@@ -15,8 +15,10 @@ export const DEFAULT_SETTINGS: PhysicsSettings = {
   liftSpeed: 1.25,
   closeSpeed: 1.35,
   clawStrength: 18,
-  gripRadius: 0.62,
   clawFriction: 1.25,
+  cableStiffness: 560,
+  cableDamping: 46,
+  swingDamping: 0.72,
   prizeMass: 0.38,
   prizeFriction: 0.78,
   angularDamping: 0.55,
@@ -28,6 +30,11 @@ const defaultMetrics: PerformanceMetrics = {
   minFps: 60,
   physicsMs: 0,
   activeBodies: 20,
+  cableTension: 0,
+  cableLength: 0,
+  cableDistance: 0,
+  swingAngle: 0,
+  tipClearance: 0,
 };
 
 interface GameStore {

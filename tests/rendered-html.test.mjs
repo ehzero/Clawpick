@@ -34,7 +34,7 @@ test("server-renders the Clawpick physics lab shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>Clawpick Physics Lab<\/title>/i);
   assert.match(html, /CLAWPICK/);
-  assert.match(html, /집게 물리 검증실/);
+  assert.match(html, /실물 기구 검증실/);
   assert.match(html, /물리 튜닝/);
   assert.doesNotMatch(html, /codex-preview/i);
   assert.doesNotMatch(html, /react-loading-skeleton/i);

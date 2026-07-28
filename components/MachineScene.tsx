@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useCallback, useRef } from "react";
 import {
   CuboidCollider,
   Physics,
@@ -9,16 +8,13 @@ import {
   type IntersectionEnterPayload,
   type RapierRigidBody,
 } from "@react-three/rapier";
-import * as THREE from "three";
 import { Prize } from "./Prize";
+import MechanicalClaw, {
+  CHUTE_X,
+  CHUTE_Z,
+  OverheadRails,
+} from "./MechanicalClaw";
 import { useGameStore } from "@/game/store";
-
-const TOP_Y = 3.45;
-const BOTTOM_Y = 1.56;
-const CHUTE_X = 2.28;
-const CHUTE_Z = 1.18;
-const CLAW_LIMIT_X = 1.9;
-const CLAW_LIMIT_Z = 1.12;
 
 const PRIZE_POSITIONS: Array<[number, number, number]> = Array.from(
   { length: 20 },
@@ -34,260 +30,6 @@ const PRIZE_POSITIONS: Array<[number, number, number]> = Array.from(
     ];
   },
 );
-
-interface ClawRigProps {
-  bodies: React.MutableRefObject<Record<string, RapierRigidBody | null>>;
-}
-
-function ClawRig({ bodies }: ClawRigProps) {
-  const armRefs = useRef<Array<RapierRigidBody | null>>([]);
-  const capRef = useRef<THREE.Group>(null);
-  const cableRef = useRef<THREE.Mesh>(null);
-  const position = useRef({ x: 0, y: TOP_Y, z: 0 });
-  const closure = useRef(0);
-  const phaseElapsed = useRef(0);
-  const lastPhase = useRef(useGameStore.getState().phase);
-  const grabbed = useRef<string | null>(null);
-  const direction = useMemo(() => new THREE.Vector3(), []);
-  const quaternion = useMemo(() => new THREE.Quaternion(), []);
-  const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
-  const frameAccumulator = useRef(0);
-  const frameCount = useRef(0);
-  const minFps = useRef(60);
-  const clawFriction = useGameStore((state) => state.settings.clawFriction);
-
-  useFrame((_, unsafeDelta) => {
-    const started = performance.now();
-    const delta = Math.min(unsafeDelta, 0.04);
-    const state = useGameStore.getState();
-    const { settings, phase, input } = state;
-    const p = position.current;
-
-    frameAccumulator.current += delta;
-    frameCount.current += 1;
-    if (delta > 0) minFps.current = Math.min(minFps.current, 1 / delta);
-
-    if (lastPhase.current !== phase) {
-      lastPhase.current = phase;
-      phaseElapsed.current = 0;
-    } else {
-      phaseElapsed.current += delta;
-    }
-
-    if (phase === "aiming") {
-      p.x = THREE.MathUtils.clamp(
-        p.x + input.x * settings.moveSpeed * delta,
-        -CLAW_LIMIT_X,
-        CLAW_LIMIT_X,
-      );
-      p.z = THREE.MathUtils.clamp(
-        p.z + input.z * settings.moveSpeed * delta,
-        -CLAW_LIMIT_Z,
-        CLAW_LIMIT_Z,
-      );
-    }
-
-    if (phase === "descending") {
-      p.y = Math.max(BOTTOM_Y, p.y - settings.lowerSpeed * delta);
-      if (p.y <= BOTTOM_Y + 0.001) state.setPhase("closing");
-    }
-
-    if (phase === "closing") {
-      closure.current = Math.min(
-        1,
-        closure.current + settings.closeSpeed * delta,
-      );
-      if (closure.current >= 0.995) {
-        let nearestId: string | null = null;
-        let nearestDistance = Number.POSITIVE_INFINITY;
-        for (const [id, body] of Object.entries(bodies.current)) {
-          if (!body) continue;
-          const bp = body.translation();
-          const horizontal = Math.hypot(bp.x - p.x, bp.z - p.z);
-          const vertical = Math.abs(bp.y - (p.y - 0.72));
-          const distance = horizontal + vertical * 0.38;
-          if (
-            horizontal < settings.gripRadius &&
-            vertical < 0.74 &&
-            distance < nearestDistance
-          ) {
-            nearestId = id;
-            nearestDistance = distance;
-          }
-        }
-        grabbed.current = nearestId;
-        state.record("grip_attempt", {
-          captured: Boolean(grabbed.current),
-          strength: settings.clawStrength,
-        });
-        state.setPhase("lifting");
-      }
-    }
-
-    const applyGripAssist = () => {
-      const id = grabbed.current;
-      if (!id) return;
-      const body = bodies.current[id];
-      if (!body) return;
-      const bp = body.translation();
-      const velocity = body.linvel();
-      const target = { x: p.x, y: p.y - 0.82, z: p.z };
-      const dx = target.x - bp.x;
-      const dy = target.y - bp.y;
-      const dz = target.z - bp.z;
-      const distance = Math.hypot(dx, dy, dz);
-      if (distance > settings.gripRadius * 1.9) {
-        grabbed.current = null;
-        state.record("grip_lost", { distance: Number(distance.toFixed(3)) });
-        return;
-      }
-      const stiffness = settings.clawStrength;
-      body.applyImpulse(
-        {
-          x: (dx * stiffness - velocity.x * 1.8) * delta,
-          y: (dy * stiffness - velocity.y * 1.5) * delta,
-          z: (dz * stiffness - velocity.z * 1.8) * delta,
-        },
-        true,
-      );
-    };
-
-    if (phase === "lifting") {
-      applyGripAssist();
-      p.y = Math.min(TOP_Y, p.y + settings.liftSpeed * delta);
-      if (p.y >= TOP_Y - 0.001) state.setPhase("returning");
-    }
-
-    if (phase === "returning") {
-      applyGripAssist();
-      const distance = Math.hypot(CHUTE_X - p.x, CHUTE_Z - p.z);
-      const step = Math.min(distance, settings.moveSpeed * 0.9 * delta);
-      if (distance > 0.001) {
-        p.x += ((CHUTE_X - p.x) / distance) * step;
-        p.z += ((CHUTE_Z - p.z) / distance) * step;
-      }
-      if (distance < 0.025) state.setPhase("releasing");
-    }
-
-    if (phase === "releasing") {
-      closure.current = Math.max(0, closure.current - 2.2 * delta);
-      if (closure.current < 0.72) grabbed.current = null;
-      if (closure.current <= 0.001) state.setPhase("settling");
-    }
-
-    if (phase === "settling" && phaseElapsed.current > 2.8) {
-      if (!state.result) state.finish("lose");
-      state.setPhase("result");
-    }
-
-    if (capRef.current) capRef.current.position.set(p.x, p.y, p.z);
-    if (cableRef.current) {
-      const length = 4.2 - p.y;
-      cableRef.current.position.set(p.x, p.y + length / 2 + 0.16, p.z);
-      cableRef.current.scale.y = Math.max(0.08, length);
-    }
-
-    const openTilt = 0.63;
-    const closedTilt = -0.2;
-    const tilt = THREE.MathUtils.lerp(openTilt, closedTilt, closure.current);
-    const armLength = 1.12;
-
-    armRefs.current.forEach((body, index) => {
-      if (!body) return;
-      const theta = index * ((Math.PI * 2) / 3) + Math.PI / 6;
-      const outwardX = Math.cos(theta);
-      const outwardZ = Math.sin(theta);
-      const topX = p.x + outwardX * 0.2;
-      const topZ = p.z + outwardZ * 0.2;
-      direction
-        .set(
-          outwardX * Math.sin(tilt),
-          -Math.cos(tilt),
-          outwardZ * Math.sin(tilt),
-        )
-        .normalize();
-      quaternion.setFromUnitVectors(up, direction);
-      body.setNextKinematicTranslation({
-        x: topX + direction.x * armLength * 0.5,
-        y: p.y - 0.17 + direction.y * armLength * 0.5,
-        z: topZ + direction.z * armLength * 0.5,
-      });
-      body.setNextKinematicRotation({
-        x: quaternion.x,
-        y: quaternion.y,
-        z: quaternion.z,
-        w: quaternion.w,
-      });
-    });
-
-    if (frameAccumulator.current >= 0.5) {
-      const fps = Math.round(frameCount.current / frameAccumulator.current);
-      state.updateMetrics({
-        fps,
-        minFps: Math.round(Math.min(minFps.current, fps)),
-        physicsMs: Number((performance.now() - started).toFixed(2)),
-        activeBodies: Object.values(bodies.current).filter(Boolean).length,
-      });
-      frameAccumulator.current = 0;
-      frameCount.current = 0;
-    }
-  });
-
-  return (
-    <>
-      <mesh ref={cableRef} castShadow>
-        <cylinderGeometry args={[0.018, 0.018, 1, 8]} />
-        <meshStandardMaterial color="#24231f" metalness={0.7} roughness={0.3} />
-      </mesh>
-
-      <group ref={capRef}>
-        <mesh castShadow>
-          <cylinderGeometry args={[0.28, 0.34, 0.26, 24]} />
-          <meshStandardMaterial color="#ff5b3d" metalness={0.45} roughness={0.24} />
-        </mesh>
-        <mesh position={[0, 0.16, 0]}>
-          <cylinderGeometry args={[0.13, 0.2, 0.13, 20]} />
-          <meshStandardMaterial color="#f8f2e7" metalness={0.65} roughness={0.2} />
-        </mesh>
-      </group>
-
-      {[0, 1, 2].map((index) => (
-        <RigidBody
-          key={index}
-          ref={(body) => {
-            armRefs.current[index] = body;
-          }}
-          type="kinematicPosition"
-          position={[0, 3, 0]}
-          colliders={false}
-          ccd
-        >
-          <CuboidCollider
-            args={[0.075, 0.56, 0.095]}
-            friction={clawFriction}
-            restitution={0}
-          />
-          <mesh castShadow>
-            <boxGeometry args={[0.15, 1.12, 0.19]} />
-            <meshStandardMaterial
-              color="#efede6"
-              metalness={0.74}
-              roughness={0.24}
-            />
-          </mesh>
-          <mesh castShadow position={[0, -0.58, 0]}>
-            <sphereGeometry args={[0.12, 12, 10]} />
-            <meshStandardMaterial
-              color="#ff765d"
-              metalness={0.35}
-              roughness={0.38}
-            />
-          </mesh>
-        </RigidBody>
-      ))}
-    </>
-  );
-}
 
 function Cabinet() {
   const finish = useGameStore((state) => state.finish);
@@ -323,14 +65,28 @@ function Cabinet() {
         <boxGeometry args={[6.3, 0.3, 4.1]} />
         <meshStandardMaterial color="#e7dcc7" roughness={0.86} />
       </mesh>
-      <mesh receiveShadow position={[CHUTE_X, 0.02, CHUTE_Z]}>
-        <boxGeometry args={[1.18, 0.04, 1.18]} />
-        <meshStandardMaterial color="#211f1b" roughness={0.68} />
+      <mesh receiveShadow position={[0, 0.01, 0]}>
+        <boxGeometry args={[5.78, 0.06, 3.55]} />
+        <meshStandardMaterial color="#e5d7bd" roughness={0.82} />
       </mesh>
-      <mesh position={[CHUTE_X, 0.04, CHUTE_Z]}>
-        <torusGeometry args={[0.54, 0.035, 8, 32]} />
-        <meshStandardMaterial color="#ff765d" emissive="#7c1e10" emissiveIntensity={0.45} />
-      </mesh>
+      <group position={[CHUTE_X, 0.08, CHUTE_Z]}>
+        <mesh receiveShadow>
+          <boxGeometry args={[1.12, 0.06, 1.12]} />
+          <meshStandardMaterial color="#1f211f" roughness={0.68} />
+        </mesh>
+        {[-0.56, 0.56].map((x) => (
+          <mesh key={`x-${x}`} castShadow position={[x, 0.1, 0]}>
+            <boxGeometry args={[0.07, 0.2, 1.2]} />
+            <meshStandardMaterial color="#d94d36" metalness={0.48} roughness={0.34} />
+          </mesh>
+        ))}
+        {[-0.56, 0.56].map((z) => (
+          <mesh key={`z-${z}`} castShadow position={[0, 0.1, z]}>
+            <boxGeometry args={[1.2, 0.2, 0.07]} />
+            <meshStandardMaterial color="#d94d36" metalness={0.48} roughness={0.34} />
+          </mesh>
+        ))}
+      </group>
 
       {[
         [-2.88, 2.12, -1.78],
@@ -343,37 +99,132 @@ function Cabinet() {
           castShadow
           position={position as [number, number, number]}
         >
-          <boxGeometry args={[0.18, 4.25, 0.18]} />
-          <meshStandardMaterial color="#302e28" metalness={0.68} roughness={0.32} />
+          <boxGeometry args={[0.22, 4.25, 0.22]} />
+          <meshStandardMaterial color="#323532" metalness={0.78} roughness={0.26} />
         </mesh>
       ))}
 
-      <mesh position={[0, 2.1, -1.86]}>
-        <planeGeometry args={[5.7, 4.05]} />
-        <meshStandardMaterial color="#f4eee3" roughness={0.9} />
+      {[-1.78, 1.78].flatMap((z) =>
+        [0.12, 4.1].map((y) => (
+          <mesh key={`${z}-${y}`} castShadow position={[0, y, z]}>
+            <boxGeometry args={[5.9, 0.18, 0.16]} />
+            <meshStandardMaterial color="#343633" metalness={0.78} roughness={0.28} />
+          </mesh>
+        )),
+      )}
+      {[-2.88, 2.88].flatMap((x) =>
+        [0.12, 4.1].map((y) => (
+          <mesh key={`${x}-${y}`} castShadow position={[x, y, 0]}>
+            <boxGeometry args={[0.16, 0.18, 3.52]} />
+            <meshStandardMaterial color="#343633" metalness={0.78} roughness={0.28} />
+          </mesh>
+        )),
+      )}
+
+      <mesh position={[0, 2.12, -1.82]}>
+        <planeGeometry args={[5.55, 3.82]} />
+        <meshStandardMaterial color="#ebe5d9" roughness={0.88} />
       </mesh>
-      <mesh position={[-2.91, 2.1, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[3.55, 4.05]} />
+      <mesh position={[0, 2.12, 1.81]}>
+        <planeGeometry args={[5.52, 3.78]} />
         <meshPhysicalMaterial
-          color="#bfe7e4"
+          color="#bde3e2"
           transparent
-          opacity={0.12}
-          roughness={0.1}
+          opacity={0.075}
+          roughness={0.08}
+          transmission={0.12}
+          depthWrite={false}
         />
       </mesh>
-      <mesh position={[2.91, 2.1, 0]} rotation={[0, -Math.PI / 2, 0]}>
-        <planeGeometry args={[3.55, 4.05]} />
+      <mesh position={[-2.84, 2.12, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[3.42, 3.78]} />
         <meshPhysicalMaterial
           color="#bfe7e4"
           transparent
-          opacity={0.12}
-          roughness={0.1}
+          opacity={0.09}
+          roughness={0.08}
+          transmission={0.1}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh position={[2.84, 2.12, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[3.42, 3.78]} />
+        <meshPhysicalMaterial
+          color="#bfe7e4"
+          transparent
+          opacity={0.09}
+          roughness={0.08}
+          transmission={0.1}
+          depthWrite={false}
         />
       </mesh>
       <mesh position={[0, 4.36, 0]}>
         <boxGeometry args={[6.25, 0.26, 4.05]} />
         <meshStandardMaterial color="#ff5b3d" metalness={0.18} roughness={0.42} />
       </mesh>
+      <mesh castShadow position={[0, 4.62, 0.02]}>
+        <boxGeometry args={[5.8, 0.34, 3.72]} />
+        <meshStandardMaterial
+          color="#f4ead7"
+          emissive="#ffcf89"
+          emissiveIntensity={0.18}
+          roughness={0.46}
+        />
+      </mesh>
+      <mesh castShadow position={[0, 4.62, 1.91]}>
+        <boxGeometry args={[5.42, 0.24, 0.08]} />
+        <meshStandardMaterial
+          color="#fff4d7"
+          emissive="#ffc76d"
+          emissiveIntensity={0.8}
+          roughness={0.3}
+        />
+      </mesh>
+
+      <group position={[-1.45, 0.2, 1.98]} rotation={[-0.16, 0, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[1.9, 0.2, 0.68]} />
+          <meshStandardMaterial color="#e95138" metalness={0.38} roughness={0.38} />
+        </mesh>
+        <mesh castShadow position={[-0.42, 0.23, 0]}>
+          <cylinderGeometry args={[0.055, 0.07, 0.34, 14]} />
+          <meshStandardMaterial color="#262825" metalness={0.6} roughness={0.35} />
+        </mesh>
+        <mesh castShadow position={[-0.42, 0.43, 0]}>
+          <sphereGeometry args={[0.13, 16, 12]} />
+          <meshStandardMaterial color="#d8b86d" metalness={0.66} roughness={0.28} />
+        </mesh>
+        <mesh castShadow position={[0.38, 0.16, 0.02]}>
+          <cylinderGeometry args={[0.16, 0.16, 0.09, 20]} />
+          <meshStandardMaterial
+            color="#fff3dc"
+            emissive="#ff765d"
+            emissiveIntensity={0.3}
+            roughness={0.35}
+          />
+        </mesh>
+      </group>
+
+      <group position={[2.08, 0.48, 1.91]}>
+        <mesh castShadow>
+          <boxGeometry args={[1.28, 0.78, 0.16]} />
+          <meshStandardMaterial color="#30322f" metalness={0.56} roughness={0.38} />
+        </mesh>
+        <mesh position={[0, 0.02, 0.09]} rotation={[0.1, 0, 0]}>
+          <boxGeometry args={[0.94, 0.48, 0.05]} />
+          <meshStandardMaterial color="#171816" roughness={0.58} />
+        </mesh>
+        <mesh castShadow position={[0.51, 0.29, 0.1]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.1, 12]} />
+          <meshStandardMaterial color="#d8b86d" metalness={0.82} roughness={0.24} />
+        </mesh>
+        {[-0.46, 0.46].map((x) => (
+          <mesh key={x} castShadow position={[x, -0.37, 0.1]}>
+            <boxGeometry args={[0.06, 0.18, 0.05]} />
+            <meshStandardMaterial color="#bfc2bd" metalness={0.82} roughness={0.24} />
+          </mesh>
+        ))}
+      </group>
     </>
   );
 }
@@ -412,6 +263,7 @@ function SceneContent() {
         debug={debug}
       >
         <Cabinet />
+        <OverheadRails />
         {PRIZE_POSITIONS.map((position, index) => (
           <Prize
             key={`${round}-prize-${index}`}
@@ -421,7 +273,7 @@ function SceneContent() {
             registerBody={registerBody}
           />
         ))}
-        <ClawRig bodies={bodies} />
+        <MechanicalClaw bodies={bodies} />
       </Physics>
     </>
   );

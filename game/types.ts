@@ -16,8 +16,10 @@ export interface PhysicsSettings {
   liftSpeed: number;
   closeSpeed: number;
   clawStrength: number;
-  gripRadius: number;
   clawFriction: number;
+  cableStiffness: number;
+  cableDamping: number;
+  swingDamping: number;
   prizeMass: number;
   prizeFriction: number;
   angularDamping: number;
@@ -29,6 +31,11 @@ export interface PerformanceMetrics {
   minFps: number;
   physicsMs: number;
   activeBodies: number;
+  cableTension: number;
+  cableLength: number;
+  cableDistance: number;
+  swingAngle: number;
+  tipClearance: number;
 }
 
 export interface SessionEvent {

@@ -68,7 +68,7 @@ export default function ClawLab() {
           </span>
           <div>
             <strong>CLAWPICK</strong>
-            <span>PHYSICS LAB / PROTOTYPE 01</span>
+            <span>MECHANICAL LAB / PROTOTYPE 02</span>
           </div>
         </div>
 
@@ -103,8 +103,8 @@ export default function ClawLab() {
           <div className="machine-card">
             <div className="machine-heading">
               <div>
-                <span className="eyebrow">MACHINE 01 · BEAR STACK</span>
-                <h1>집게 물리 검증실</h1>
+                <span className="eyebrow">MACHINE 01 · SOLENOID 3-PRONG</span>
+                <h1>실물 기구 검증실</h1>
               </div>
               <div className={`phase-pill phase-${phase}`}>
                 <span>{String(Object.keys(PHASE_LABELS).indexOf(phase) + 1).padStart(2, "0")}</span>
@@ -116,9 +116,36 @@ export default function ClawLab() {
               <GameCanvas />
 
               <div className="viewport-badge">
-                <span>RAPIER</span>
-                FIXED 60 HZ
+                <span>4-BODY CLAW</span>
+                RAPIER · 60 HZ
               </div>
+
+              {debug && (
+                <div className="mechanism-debug" aria-live="polite">
+                  <span>MECHANISM DEBUG</span>
+                  <dl>
+                    <div>
+                      <dt>CABLE</dt>
+                      <dd>{metrics.cableTension.toFixed(1)} N</dd>
+                    </div>
+                    <div>
+                      <dt>LENGTH</dt>
+                      <dd>
+                        {metrics.cableDistance.toFixed(2)} /
+                        {metrics.cableLength.toFixed(2)} m
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>SWING</dt>
+                      <dd>{metrics.swingAngle.toFixed(1)}°</dd>
+                    </div>
+                    <div>
+                      <dt>TIP GAP</dt>
+                      <dd>{metrics.tipClearance.toFixed(0)} mm</dd>
+                    </div>
+                  </dl>
+                </div>
+              )}
 
               <div className="metrics-strip">
                 <div>
@@ -163,22 +190,22 @@ export default function ClawLab() {
             <article>
               <span>01</span>
               <div>
-                <strong>고정 물리 스텝</strong>
-                <p>렌더 프레임과 분리된 60Hz 시뮬레이션</p>
+                <strong>공유 플런저 링크</strong>
+                <p>하나의 액추에이터가 세 힌지를 동기 구동</p>
               </div>
             </article>
             <article>
               <span>02</span>
               <div>
-                <strong>20개 동적 인형</strong>
-                <p>질량·마찰·감쇠를 실시간으로 비교</p>
+                <strong>와이어 서스펜션</strong>
+                <p>트롤리 가속도와 케이블 길이에 따른 진자 운동</p>
               </div>
             </article>
             <article>
               <span>03</span>
               <div>
-                <strong>재현 가능한 기록</strong>
-                <p>설정과 입력 이벤트를 JSON으로 보존</p>
+                <strong>물리 접촉 파지</strong>
+                <p>숨은 흡착력 없이 형상·마찰·관절력으로 획득</p>
               </div>
             </article>
           </div>
