@@ -119,6 +119,9 @@ export default function ClawLab() {
                 <span>4-BODY CLAW</span>
                 RAPIER · 60 HZ
               </div>
+              <div className="camera-hint" aria-hidden="true">
+                DRAG TO ORBIT · WHEEL / PINCH TO ZOOM
+              </div>
 
               {debug && (
                 <div className="mechanism-debug" aria-live="polite">
