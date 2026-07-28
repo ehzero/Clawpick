@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   measureInextensibleCable,
@@ -6,6 +7,22 @@ import {
 } from "../game/cableDynamics.mjs";
 
 const ZERO = { x: 0, y: 0, z: 0 };
+
+test("the raised claw retracts almost all visible cable", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+  const minimumLength = Number(
+    source.match(/const MIN_CABLE_LENGTH = ([\d.]+);/)?.[1],
+  );
+  const attachmentY = Number(
+    source.match(/const CLAW_ATTACHMENT_Y = ([\d.]+);/)?.[1],
+  );
+
+  assert.ok(minimumLength <= 0.05);
+  assert.ok(attachmentY >= 0.36);
+});
 
 function radialRate(direction, anchorVelocity, attachmentVelocity) {
   return (
