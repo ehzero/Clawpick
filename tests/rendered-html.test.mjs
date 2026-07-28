@@ -36,6 +36,7 @@ test("server-renders the Clawpick physics lab shell", async () => {
   assert.match(html, /CLAWPICK/);
   assert.match(html, /실물 기구 검증실/);
   assert.match(html, /DRAG TO ORBIT/);
+  assert.match(html, /8-WAY · HOLD &amp; DRAG/);
   assert.match(html, /물리 튜닝/);
   assert.doesNotMatch(html, /codex-preview/i);
   assert.doesNotMatch(html, /react-loading-skeleton/i);

@@ -1,49 +1,152 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CircleDot } from "lucide-react";
 import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  CircleDot,
-} from "lucide-react";
+  clampJoystickOffset,
+  getEightWayInput,
+} from "@/game/joystick.mjs";
 import { useGameStore } from "@/game/store";
 
-interface DirectionButtonProps {
-  label: string;
-  x: number;
-  z: number;
+const DIRECTION_MARKERS = [
+  { symbol: "→", className: "east", label: "오른쪽" },
+  { symbol: "↘", className: "south-east", label: "오른쪽 아래" },
+  { symbol: "↓", className: "south", label: "아래" },
+  { symbol: "↙", className: "south-west", label: "왼쪽 아래" },
+  { symbol: "←", className: "west", label: "왼쪽" },
+  { symbol: "↖", className: "north-west", label: "왼쪽 위" },
+  { symbol: "↑", className: "north", label: "위" },
+  { symbol: "↗", className: "north-east", label: "오른쪽 위" },
+];
+
+interface JoystickVisual {
   className: string;
-  children: React.ReactNode;
+  x: number;
+  y: number;
+  directionIndex: number;
+  active: boolean;
 }
 
-function DirectionButton({
-  label,
-  x,
-  z,
-  className,
-  children,
-}: DirectionButtonProps) {
+const NEUTRAL_VISUAL: JoystickVisual = {
+  className: "",
+  x: 0,
+  y: 0,
+  directionIndex: -1,
+  active: false,
+};
+
+function EightWayJoystick() {
   const setInput = useGameStore((state) => state.setInput);
   const phase = useGameStore((state) => state.phase);
-  const stop = () => setInput(0, 0);
+  const pointerIdRef = useRef<number | null>(null);
+  const [visual, setVisual] = useState<JoystickVisual>(NEUTRAL_VISUAL);
+
+  const resetJoystick = () => {
+    pointerIdRef.current = null;
+    setVisual(NEUTRAL_VISUAL);
+    setInput(0, 0);
+  };
+
+  const updateFromPointer = useCallback(
+    (element: HTMLButtonElement, clientX: number, clientY: number) => {
+      const bounds = element.getBoundingClientRect();
+      const deltaX = clientX - (bounds.left + bounds.width / 2);
+      const deltaY = clientY - (bounds.top + bounds.height / 2);
+      const size = Math.min(bounds.width, bounds.height);
+      const maxTravel = size * 0.28;
+      const direction = getEightWayInput(deltaX, deltaY, size * 0.1);
+      const offset = clampJoystickOffset(deltaX, deltaY, maxTravel);
+
+      setInput(direction.x, direction.z);
+      setVisual({
+        className:
+          direction.index === -1
+            ? ""
+            : DIRECTION_MARKERS[direction.index].className,
+        x: offset.x,
+        y: offset.y,
+        directionIndex: direction.index,
+        active: true,
+      });
+    },
+    [setInput],
+  );
+
+  const stopPointer = (element: HTMLButtonElement, pointerId: number) => {
+    if (pointerIdRef.current !== pointerId) return;
+    pointerIdRef.current = null;
+    if (element.hasPointerCapture(pointerId)) {
+      element.releasePointerCapture(pointerId);
+    }
+    setVisual(NEUTRAL_VISUAL);
+    setInput(0, 0);
+  };
+
+  const directionLabel =
+    visual.directionIndex === -1
+      ? "중립"
+      : DIRECTION_MARKERS[visual.directionIndex].label;
 
   return (
     <button
       type="button"
-      className={`direction-button ${className}`}
-      aria-label={label}
+      className={`joystick${visual.active ? " active" : ""}`}
+      aria-label={`8방향 집게 조이스틱, 현재 ${directionLabel}`}
+      data-direction={visual.className || "neutral"}
       disabled={phase !== "aiming"}
       onPointerDown={(event) => {
+        if (pointerIdRef.current !== null) return;
+        event.preventDefault();
+        pointerIdRef.current = event.pointerId;
         event.currentTarget.setPointerCapture(event.pointerId);
-        setInput(x, z);
+        updateFromPointer(
+          event.currentTarget,
+          event.clientX,
+          event.clientY,
+        );
       }}
-      onPointerUp={stop}
-      onPointerCancel={stop}
-      onPointerLeave={stop}
+      onPointerMove={(event) => {
+        if (pointerIdRef.current !== event.pointerId) return;
+        event.preventDefault();
+        updateFromPointer(
+          event.currentTarget,
+          event.clientX,
+          event.clientY,
+        );
+      }}
+      onPointerUp={(event) => {
+        stopPointer(event.currentTarget, event.pointerId);
+      }}
+      onPointerCancel={(event) => {
+        stopPointer(event.currentTarget, event.pointerId);
+      }}
+      onLostPointerCapture={(event) => {
+        if (pointerIdRef.current === event.pointerId) {
+          resetJoystick();
+        }
+      }}
     >
-      {children}
+      <span className="joystick-gate" aria-hidden="true" />
+      {DIRECTION_MARKERS.map((marker, index) => (
+        <span
+          key={marker.className}
+          className={`joystick-direction ${marker.className}${
+            visual.directionIndex === index ? " selected" : ""
+          }`}
+          aria-hidden="true"
+        >
+          {marker.symbol}
+        </span>
+      ))}
+      <span
+        className="joystick-thumb"
+        style={{
+          transform: `translate3d(${visual.x}px, ${visual.y}px, 0)`,
+        }}
+        aria-hidden="true"
+      >
+        <CircleDot size={19} strokeWidth={2.2} />
+      </span>
     </button>
   );
 }
@@ -56,11 +159,13 @@ export function Controls() {
   useEffect(() => {
     const pressed = new Set<string>();
     const sync = () => {
-      const x = Number(pressed.has("ArrowRight") || pressed.has("KeyD")) -
+      const rawX = Number(pressed.has("ArrowRight") || pressed.has("KeyD")) -
         Number(pressed.has("ArrowLeft") || pressed.has("KeyA"));
-      const z = Number(pressed.has("ArrowDown") || pressed.has("KeyS")) -
+      const rawZ = Number(pressed.has("ArrowDown") || pressed.has("KeyS")) -
         Number(pressed.has("ArrowUp") || pressed.has("KeyW"));
-      setInput(x, z);
+      const magnitude = Math.hypot(rawX, rawZ);
+      const scale = magnitude > 1 ? 1 / magnitude : 1;
+      setInput(rawX * scale, rawZ * scale);
     };
     const down = (event: KeyboardEvent) => {
       if (
@@ -92,24 +197,11 @@ export function Controls() {
   return (
     <div className="control-deck">
       <div>
-        <div className="control-kicker">MOVE CLAW</div>
-        <div className="dpad" aria-label="집게 방향 조작">
-          <DirectionButton label="앞으로 이동" x={0} z={-1} className="up">
-            <ArrowUp size={18} strokeWidth={2.5} />
-          </DirectionButton>
-          <DirectionButton label="왼쪽으로 이동" x={-1} z={0} className="left">
-            <ArrowLeft size={18} strokeWidth={2.5} />
-          </DirectionButton>
-          <div className="dpad-center">
-            <CircleDot size={13} />
-          </div>
-          <DirectionButton label="오른쪽으로 이동" x={1} z={0} className="right">
-            <ArrowRight size={18} strokeWidth={2.5} />
-          </DirectionButton>
-          <DirectionButton label="뒤로 이동" x={0} z={1} className="down">
-            <ArrowDown size={18} strokeWidth={2.5} />
-          </DirectionButton>
+        <div className="control-kicker">
+          MOVE CLAW
+          <span className="joystick-mode">8-WAY · HOLD &amp; DRAG</span>
         </div>
+        <EightWayJoystick key={phase} />
       </div>
 
       <div className="drop-control">
