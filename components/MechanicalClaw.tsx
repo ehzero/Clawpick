@@ -18,14 +18,17 @@ import {
   useRevoluteJoint,
   type RapierRigidBody,
 } from "@react-three/rapier";
-import type { ImpulseJoint } from "@dimforge/rapier3d-compat";
+import type { RopeImpulseJoint } from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
 import {
   CLAW_GEOMETRY,
   getClawPose,
   sampleClawClearance,
 } from "@/game/clawKinematics.mjs";
-import { computeCableConstraint } from "@/game/cableDynamics.mjs";
+import {
+  measureInextensibleCable,
+  projectInextensibleCableVelocity,
+} from "@/game/cableDynamics.mjs";
 import { useGameStore } from "@/game/store";
 
 export const TROLLEY_Y = 4.02;
@@ -130,10 +133,10 @@ function FingerJoint({
     housingRef as RefObject<RapierRigidBody>,
     fingerRef as RefObject<RapierRigidBody>,
     [
-    hinge.toArray(),
-    [0, 0, 0],
-    axis,
-    [CLAW_GEOMETRY.minimumAngle, CLAW_GEOMETRY.maximumAngle],
+      hinge.toArray(),
+      [0, 0, 0],
+      axis,
+      [CLAW_GEOMETRY.minimumAngle, CLAW_GEOMETRY.maximumAngle],
     ],
   );
 
@@ -163,26 +166,24 @@ function ClawFinger({
   const shape = useMemo(() => {
     const theta = index * ((Math.PI * 2) / FINGER_COUNT) + Math.PI / 6;
     const radial = new THREE.Vector3(Math.cos(theta), 0, Math.sin(theta));
-    const origin = new THREE.Vector3();
-    const knee = new THREE.Vector3(0, -geometry.proximalLength, 0);
-    const tip = knee
-      .clone()
-      .addScaledVector(
-        radial,
-        Math.sin(geometry.bendAngle) * geometry.distalLength,
-      )
-      .add(
+    const points = geometry.curvePoints.map(
+      (point) =>
         new THREE.Vector3(
-          0,
-          -Math.cos(geometry.bendAngle) * geometry.distalLength,
-          0,
+          radial.x * point.r,
+          point.y,
+          radial.z * point.r,
         ),
-      );
+    );
     return {
-      proximal: between(origin, knee),
-      distal: between(knee, tip),
-      knee: knee.toArray() as [number, number, number],
-      tip: tip.toArray() as [number, number, number],
+      curve: new THREE.CatmullRomCurve3(
+        points,
+        false,
+        "centripetal",
+      ),
+      segments: points.slice(0, -1).map((point, segmentIndex) =>
+        between(point, points[segmentIndex + 1]),
+      ),
+      tip: points.at(-1)!.toArray() as [number, number, number],
     };
   }, [geometry, index]);
   const hinge = radialPoint(index, geometry.hingeRadius, geometry.hingeY);
@@ -203,30 +204,24 @@ function ClawFinger({
         ccd
         name={`claw-finger-${index + 1}`}
       >
-        <CapsuleCollider
-          args={[
-            Math.max(0.02, shape.proximal.length / 2 - geometry.tineRadius),
-            geometry.tineRadius,
-          ]}
-          position={shape.proximal.position}
-          quaternion={shape.proximal.quaternion}
-          friction={clawFriction}
-          restitution={0.01}
-          mass={0.13}
-          collisionGroups={FINGER_COLLISION_GROUPS}
-        />
-        <CapsuleCollider
-          args={[
-            Math.max(0.02, shape.distal.length / 2 - geometry.tineRadius),
-            geometry.tineRadius,
-          ]}
-          position={shape.distal.position}
-          quaternion={shape.distal.quaternion}
-          friction={clawFriction}
-          restitution={0.01}
-          mass={0.08}
-          collisionGroups={FINGER_COLLISION_GROUPS}
-        />
+        {shape.segments.map((segment, segmentIndex) => (
+          <CapsuleCollider
+            key={segmentIndex}
+            args={[
+              Math.max(
+                0.02,
+                segment.length / 2 - geometry.tineRadius,
+              ),
+              geometry.tineRadius,
+            ]}
+            position={segment.position}
+            quaternion={segment.quaternion}
+            friction={clawFriction}
+            restitution={0.01}
+            mass={0.07}
+            collisionGroups={FINGER_COLLISION_GROUPS}
+          />
+        ))}
         <BallCollider
           args={[geometry.scoopRadius]}
           position={shape.tip}
@@ -244,38 +239,14 @@ function ClawFinger({
             roughness={0.24}
           />
         </mesh>
-        <mesh
-          castShadow
-          position={shape.proximal.position}
-          quaternion={shape.proximal.quaternion}
-          scale={[1, shape.proximal.length, 1]}
-        >
-          <cylinderGeometry args={[0.054, 0.065, 1, 14]} />
+        <mesh castShadow>
+          <tubeGeometry
+            args={[shape.curve, 28, geometry.tineRadius, 12, false]}
+          />
           <meshStandardMaterial
             color="#dfe2e0"
             metalness={0.92}
             roughness={0.16}
-          />
-        </mesh>
-        <mesh castShadow position={shape.knee}>
-          <sphereGeometry args={[0.063, 14, 10]} />
-          <meshStandardMaterial
-            color="#c8cbc9"
-            metalness={0.9}
-            roughness={0.18}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={shape.distal.position}
-          quaternion={shape.distal.quaternion}
-          scale={[1, shape.distal.length, 1]}
-        >
-          <cylinderGeometry args={[0.047, 0.057, 1, 14]} />
-          <meshStandardMaterial
-            color="#f0f1ee"
-            metalness={0.94}
-            roughness={0.14}
           />
         </mesh>
         <mesh
@@ -452,8 +423,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const frameAccumulator = useRef(0);
   const frameCount = useRef(0);
   const minFps = useRef(60);
-  const lastTension = useRef(0);
-  const ropeJoint = useRef<ImpulseJoint | null>(null);
+  const ropeJoint = useRef<RopeImpulseJoint | null>(null);
+  const ropeJointLength = useRef(Number.NaN);
   const powerCable = useMemo(
     () => {
       const geometry = new THREE.BufferGeometry();
@@ -506,6 +477,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       phaseElapsed.current += delta;
     }
 
+    const previousCableLength = cableLength.current;
     let desiredX = 0;
     let desiredZ = 0;
     if (phase === "aiming") {
@@ -633,18 +605,29 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       y: CABLE_ANCHOR_Y,
       z: trolleyPosition.current.z,
     });
-    if (!ropeJoint.current) {
+    if (
+      !ropeJoint.current ||
+      Math.abs(ropeJointLength.current - cableLength.current) > 0.002
+    ) {
+      const previousJoint = ropeJoint.current;
+      if (
+        previousJoint &&
+        world.getImpulseJoint(previousJoint.handle)
+      ) {
+        world.removeImpulseJoint(previousJoint, true);
+      }
       ropeJoint.current = world.createImpulseJoint(
         rapier.JointData.rope(
-          MAX_CABLE_LENGTH,
+          cableLength.current,
           { x: 0, y: 0, z: 0 },
           { x: 0, y: CLAW_ATTACHMENT_Y, z: 0 },
         ),
         anchorBody,
         housing,
         true,
-      );
+      ) as RopeImpulseJoint;
       ropeJoint.current.setContactsEnabled(false);
+      ropeJointLength.current = cableLength.current;
     }
     if (drumRef.current) {
       drumRef.current.rotation.y +=
@@ -677,31 +660,29 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       trolleyPosition.current.z,
     );
     const attachmentVelocity = housing.velocityAtPoint(attachment);
-    const cableConstraint = computeCableConstraint({
+    const cableState = measureInextensibleCable({
       anchor,
       attachment,
-      anchorVelocity: {
-        x: trolleyVelocity.current.x,
-        y: 0,
-        z: trolleyVelocity.current.z,
-      },
-      attachmentVelocity,
       targetLength: cableLength.current,
-      stiffness: settings.cableStiffness,
-      damping: settings.cableDamping,
-      maxTension: 320,
     });
-    const tension = cableConstraint.tension;
-    lastTension.current = tension;
-    if (tension > 0) {
-      housing.applyImpulse(
-        {
-          x: cableConstraint.force.x * delta,
-          y: cableConstraint.force.y * delta,
-          z: cableConstraint.force.z * delta,
+    const targetLengthRate =
+      (cableLength.current - previousCableLength) / Math.max(delta, 0.0001);
+    if (
+      phase === "descending" ||
+      phase === "lifting" ||
+      cableState.distance >= cableLength.current - 0.025
+    ) {
+      const projectedVelocity = projectInextensibleCableVelocity({
+        direction: cableState.direction,
+        anchorVelocity: {
+          x: trolleyVelocity.current.x,
+          y: 0,
+          z: trolleyVelocity.current.z,
         },
-        true,
-      );
+        attachmentVelocity,
+        targetLengthRate,
+      });
+      housing.setLinvel(projectedVelocity.velocity, true);
     }
 
     setMeshBetween(cableRef.current, anchor, attachment);
@@ -766,9 +747,9 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       const fingerPosition = finger.translation();
       const fingerRotation = finger.rotation();
       const linkEndLocal = new THREE.Vector3(
-        0,
-        -CLAW_GEOMETRY.connectorTineOffset,
-        0,
+        Math.cos(theta) * CLAW_GEOMETRY.connectorPoint.r,
+        CLAW_GEOMETRY.connectorPoint.y,
+        Math.sin(theta) * CLAW_GEOMETRY.connectorPoint.r,
       )
         .applyQuaternion(
           new THREE.Quaternion(
@@ -790,9 +771,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
 
     if (debugTensionRef.current) {
       setMeshBetween(debugTensionRef.current, anchor, attachment);
-      const scale = THREE.MathUtils.clamp(tension / 80, 0.4, 2.4);
-      debugTensionRef.current.scale.x = scale;
-      debugTensionRef.current.scale.z = scale;
     }
 
     if (frameAccumulator.current >= 0.5) {
@@ -803,10 +781,10 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         physicsMs: Number((performance.now() - started).toFixed(2)),
         activeBodies:
           Object.values(bodies.current).filter(Boolean).length + 5,
-        cableTension: Number(lastTension.current.toFixed(1)),
+        cableError: Number((cableState.overrun * 1000).toFixed(1)),
         cableLength: Number(cableLength.current.toFixed(2)),
-        cableDistance: Number(cableConstraint.distance.toFixed(2)),
-        swingAngle: Number(cableConstraint.swingAngle.toFixed(1)),
+        cableDistance: Number(cableState.distance.toFixed(2)),
+        swingAngle: Number(cableState.swingAngle.toFixed(1)),
         tipClearance: Number((sampleClawClearance() * 1000).toFixed(0)),
       });
       frameAccumulator.current = 0;

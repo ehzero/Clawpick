@@ -125,8 +125,8 @@ export default function ClawLab() {
                   <span>MECHANISM DEBUG</span>
                   <dl>
                     <div>
-                      <dt>CABLE</dt>
-                      <dd>{metrics.cableTension.toFixed(1)} N</dd>
+                      <dt>LENGTH ERROR</dt>
+                      <dd>{metrics.cableError.toFixed(1)} mm</dd>
                     </div>
                     <div>
                       <dt>LENGTH</dt>
@@ -190,15 +190,15 @@ export default function ClawLab() {
             <article>
               <span>01</span>
               <div>
-                <strong>공유 플런저 링크</strong>
-                <p>하나의 액추에이터가 세 힌지를 동기 구동</p>
+                <strong>단일 힌지 곡선 집게</strong>
+                <p>관절 하나를 가진 세 곡선 발을 플런저가 동기 구동</p>
               </div>
             </article>
             <article>
               <span>02</span>
               <div>
-                <strong>와이어 서스펜션</strong>
-                <p>트롤리 가속도와 케이블 길이에 따른 진자 운동</p>
+                <strong>비신축 와이어 승강</strong>
+                <p>스프링 없이 윈치 길이 변화로만 하강·상승</p>
               </div>
             </article>
             <article>

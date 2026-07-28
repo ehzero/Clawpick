@@ -2,19 +2,10 @@ function length3(vector) {
   return Math.hypot(vector.x, vector.y, vector.z);
 }
 
-function clamp(value, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, value));
-}
-
-export function computeCableConstraint({
+export function measureInextensibleCable({
   anchor,
   attachment,
-  anchorVelocity,
-  attachmentVelocity,
   targetLength,
-  stiffness,
-  damping,
-  maxTension = 520,
 }) {
   const offset = {
     x: anchor.x - attachment.x,
@@ -27,6 +18,27 @@ export function computeCableConstraint({
     y: offset.y / distance,
     z: offset.z / distance,
   };
+  const lengthError = distance - targetLength;
+  const horizontalDistance = Math.hypot(offset.x, offset.z);
+  const verticalDistance = Math.max(0.000001, Math.abs(offset.y));
+
+  return {
+    distance,
+    lengthError,
+    slack: Math.max(0, -lengthError),
+    overrun: Math.max(0, lengthError),
+    swingAngle:
+      Math.atan2(horizontalDistance, verticalDistance) * (180 / Math.PI),
+    direction,
+  };
+}
+
+export function projectInextensibleCableVelocity({
+  direction,
+  anchorVelocity,
+  attachmentVelocity,
+  targetLengthRate,
+}) {
   const relativeVelocity = {
     x: anchorVelocity.x - attachmentVelocity.x,
     y: anchorVelocity.y - attachmentVelocity.y,
@@ -36,31 +48,16 @@ export function computeCableConstraint({
     relativeVelocity.x * direction.x +
     relativeVelocity.y * direction.y +
     relativeVelocity.z * direction.z;
-  const extension = distance - targetLength;
-  const tension =
-    extension > 0
-      ? clamp(
-          extension * stiffness +
-            Math.max(0, stretchRate) * damping,
-          0,
-          maxTension,
-        )
-      : 0;
-  const horizontalDistance = Math.hypot(offset.x, offset.z);
-  const verticalDistance = Math.max(0.000001, Math.abs(offset.y));
+  const radialCorrection = stretchRate - targetLengthRate;
 
   return {
-    distance,
-    extension,
-    stretchRate,
-    tension,
-    swingAngle:
-      Math.atan2(horizontalDistance, verticalDistance) * (180 / Math.PI),
-    direction,
-    force: {
-      x: direction.x * tension,
-      y: direction.y * tension,
-      z: direction.z * tension,
+    radialRateBefore: stretchRate,
+    targetLengthRate,
+    radialCorrection,
+    velocity: {
+      x: attachmentVelocity.x + direction.x * radialCorrection,
+      y: attachmentVelocity.y + direction.y * radialCorrection,
+      z: attachmentVelocity.z + direction.z * radialCorrection,
     },
   };
 }

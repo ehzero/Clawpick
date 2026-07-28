@@ -165,8 +165,6 @@ export function TuningPanel() {
             <Slider label="닫힘 속도" setting="closeSpeed" min={0.4} max={2.8} step={0.05} />
             <Slider label="파지 강도" setting="clawStrength" min={4} max={34} step={0.5} unit=" N" />
             <Slider label="집게 마찰" setting="clawFriction" min={0.1} max={2} step={0.05} />
-            <Slider label="케이블 장력" setting="cableStiffness" min={280} max={900} step={10} unit=" N/m" />
-            <Slider label="케이블 감쇠" setting="cableDamping" min={15} max={90} step={1} />
             <Slider label="흔들림 감쇠" setting="swingDamping" min={0.1} max={2} step={0.05} />
           </>
         ) : (

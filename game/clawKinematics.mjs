@@ -3,18 +3,22 @@ const DEG = Math.PI / 180;
 export const CLAW_GEOMETRY = Object.freeze({
   hingeRadius: 0.27,
   hingeY: -0.16,
-  proximalLength: 0.42,
-  distalLength: 0.47,
+  jointsPerFinger: 1,
+  curvePoints: Object.freeze([
+    Object.freeze({ r: 0, y: 0 }),
+    Object.freeze({ r: -0.03, y: -0.23 }),
+    Object.freeze({ r: -0.16, y: -0.52 }),
+    Object.freeze({ r: -0.37, y: -0.78 }),
+  ]),
   tineRadius: 0.05,
   scoopRadius: 0.07,
-  bendAngle: -48 * DEG,
   openAngle: 50 * DEG,
-  closedAngle: 13 * DEG,
-  minimumAngle: 10 * DEG,
+  closedAngle: 14 * DEG,
+  minimumAngle: 12 * DEG,
   maximumAngle: 54 * DEG,
   connectorRadius: 0.1,
   connectorLength: 0.42,
-  connectorTineOffset: 0.24,
+  connectorPoint: Object.freeze({ r: -0.03, y: -0.23 }),
 });
 
 export function clampClosure(value) {
@@ -36,20 +40,21 @@ export function getClawPose(closure) {
   const angle =
     geometry.openAngle +
     (geometry.closedAngle - geometry.openAngle) * t;
-  const distalAngle = angle + geometry.bendAngle;
   const hinge = { r: geometry.hingeRadius, y: geometry.hingeY };
-  const knee = {
-    r: hinge.r + Math.sin(angle) * geometry.proximalLength,
-    y: hinge.y - Math.cos(angle) * geometry.proximalLength,
-  };
-  const tip = {
-    r: knee.r + Math.sin(distalAngle) * geometry.distalLength,
-    y: knee.y - Math.cos(distalAngle) * geometry.distalLength,
-  };
-  const linkEnd = {
-    r: hinge.r + Math.sin(angle) * geometry.connectorTineOffset,
-    y: hinge.y - Math.cos(angle) * geometry.connectorTineOffset,
-  };
+  const rotatePoint = (point) => ({
+    r:
+      hinge.r +
+      Math.cos(angle) * point.r -
+      Math.sin(angle) * point.y,
+    y:
+      hinge.y +
+      Math.sin(angle) * point.r +
+      Math.cos(angle) * point.y,
+  });
+  const tip = rotatePoint(
+    geometry.curvePoints[geometry.curvePoints.length - 1],
+  );
+  const linkEnd = rotatePoint(geometry.connectorPoint);
   const horizontal = linkEnd.r - geometry.connectorRadius;
   const vertical = Math.sqrt(
     Math.max(
@@ -64,9 +69,7 @@ export function getClawPose(closure) {
   return {
     closure: t,
     angle,
-    distalAngle,
     hinge,
-    knee,
     tip,
     linkStart,
     linkEnd,

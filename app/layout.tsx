@@ -25,7 +25,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const origin = `${protocol}://${host}`;
   const title = "Clawpick Physics Lab";
   const description =
-    "다관절 집게와 케이블 현가를 통해 실제 인형 뽑기 머신의 기구와 움직임을 검증하는 웹 물리 프로토타입";
+    "단일 힌지 곡선 집게와 비신축 케이블 승강으로 실제 인형 뽑기 머신의 움직임을 검증하는 웹 물리 프로토타입";
 
   return {
     metadataBase: new URL(origin),
@@ -38,10 +38,10 @@ export async function generateMetadata(): Promise<Metadata> {
       url: origin,
       images: [
         {
-          url: `${origin}/og-mechanical.png`,
+          url: `${origin}/og-single-hinge.png`,
           width: 1200,
           height: 630,
-          alt: "케이블에 매달린 다관절 집게와 상부 크레인이 보이는 Clawpick Mechanical Lab",
+          alt: "비신축 케이블에 매달린 곡선 집게와 상부 크레인이 보이는 Clawpick Mechanical Lab",
         },
       ],
     },
@@ -49,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title,
       description,
-      images: [`${origin}/og-mechanical.png`],
+      images: [`${origin}/og-single-hinge.png`],
     },
   };
 }

@@ -7,7 +7,15 @@ import {
   sampleClawClearance,
 } from "../game/clawKinematics.mjs";
 
-test("the shared plunger keeps all linkage poses inside hard limits", () => {
+test("each curved finger has one hinge and stays inside its hard limits", () => {
+  assert.equal(CLAW_GEOMETRY.jointsPerFinger, 1);
+  assert.equal(CLAW_GEOMETRY.curvePoints.length, 4);
+  assert.notEqual(
+    CLAW_GEOMETRY.curvePoints[1].r / CLAW_GEOMETRY.curvePoints[1].y,
+    CLAW_GEOMETRY.curvePoints[3].r / CLAW_GEOMETRY.curvePoints[3].y,
+    "the single rigid finger should follow a curve instead of a straight line",
+  );
+
   for (let index = 0; index <= 100; index += 1) {
     const pose = getClawPose(index / 100);
     assert.ok(pose.angle >= CLAW_GEOMETRY.minimumAngle);
@@ -42,6 +50,9 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   );
   assert.doesNotMatch(source, /applyGripAssist|gripRadius|grabbed\.current/);
   assert.match(source, /configureMotorPosition/);
-  assert.match(source, /JointData\.rope/);
-  assert.match(source, /applyImpulse/);
+  assert.match(source, /tubeGeometry/);
+  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 1);
+  assert.doesNotMatch(source, /proximalLength|distalLength|bendAngle|shape\.knee/);
+  assert.match(source, /JointData\.rope\(\s*cableLength\.current/);
+  assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);
 });

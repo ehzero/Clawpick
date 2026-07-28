@@ -17,8 +17,6 @@ export interface PhysicsSettings {
   closeSpeed: number;
   clawStrength: number;
   clawFriction: number;
-  cableStiffness: number;
-  cableDamping: number;
   swingDamping: number;
   prizeMass: number;
   prizeFriction: number;
@@ -31,7 +29,7 @@ export interface PerformanceMetrics {
   minFps: number;
   physicsMs: number;
   activeBodies: number;
-  cableTension: number;
+  cableError: number;
   cableLength: number;
   cableDistance: number;
   swingAngle: number;
