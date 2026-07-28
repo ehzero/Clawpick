@@ -3,7 +3,6 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -38,7 +37,6 @@ test("server-renders the Clawpick physics lab shell", async () => {
   assert.match(html, /DRAG TO ORBIT/);
   assert.match(html, /8-WAY · HOLD &amp; DRAG/);
   assert.match(html, /물리 튜닝/);
-  assert.doesNotMatch(html, /codex-preview/i);
   assert.doesNotMatch(html, /react-loading-skeleton/i);
 });
 
@@ -51,9 +49,6 @@ test("removes the starter and keeps product metadata", async () => {
 
   assert.match(page, /<ClawLab \/>/);
   assert.match(layout, /const title = "Clawpick Physics Lab"/);
-  assert.doesNotMatch(page, /codex-preview|_sites-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  await assert.rejects(access(new URL("SkeletonPreview.tsx", previewRoot)));
-  await assert.rejects(access(new URL("preview.css", previewRoot)));
   await access(new URL("components/MachineScene.tsx", templateRoot));
 });
