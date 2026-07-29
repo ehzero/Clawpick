@@ -26,6 +26,7 @@ interface PrizeProps {
 
 export function Prize({ id, index, position, registerBody }: PrizeProps) {
   const settings = useGameStore((state) => state.settings);
+  const debug = useGameStore((state) => state.debug);
   const color = COLORS[index % COLORS.length];
   const accent = index % 2 === 0 ? "#fff5dc" : "#f8ebff";
 
@@ -56,6 +57,7 @@ export function Prize({ id, index, position, registerBody }: PrizeProps) {
         mass={settings.prizeMass * 0.38}
       />
 
+      <group name={`${id}-render-meshes`} visible={!debug}>
       <mesh castShadow receiveShadow position={[0, 0.18, 0]}>
         <capsuleGeometry args={[0.22, 0.3, 8, 14]} />
         <meshStandardMaterial color={color} roughness={0.86} />
@@ -84,6 +86,7 @@ export function Prize({ id, index, position, registerBody }: PrizeProps) {
         <sphereGeometry args={[0.018, 8, 8]} />
         <meshStandardMaterial color="#25231f" />
       </mesh>
+      </group>
     </RigidBody>
   );
 }

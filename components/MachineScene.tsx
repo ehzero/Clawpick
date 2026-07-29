@@ -31,7 +31,7 @@ const PRIZE_POSITIONS: Array<[number, number, number]> = Array.from(
   },
 );
 
-function Cabinet() {
+function Cabinet({ showVisuals }: { showVisuals: boolean }) {
   const finish = useGameStore((state) => state.finish);
 
   const handleWin = (payload: IntersectionEnterPayload) => {
@@ -61,6 +61,7 @@ function Cabinet() {
         />
       </RigidBody>
 
+      <group name="cabinet-render-meshes" visible={showVisuals}>
       <mesh receiveShadow position={[0, -0.14, 0]}>
         <boxGeometry args={[6.3, 0.3, 4.1]} />
         <meshStandardMaterial color="#e7dcc7" roughness={0.86} />
@@ -225,6 +226,7 @@ function Cabinet() {
           </mesh>
         ))}
       </group>
+      </group>
     </>
   );
 }
@@ -262,8 +264,8 @@ function SceneContent() {
         timeStep={1 / 60}
         debug={debug}
       >
-        <Cabinet />
-        <OverheadRails />
+        <Cabinet showVisuals={!debug} />
+        <OverheadRails showVisuals={!debug} />
         {PRIZE_POSITIONS.map((position, index) => (
           <Prize
             key={`${round}-prize-${index}`}

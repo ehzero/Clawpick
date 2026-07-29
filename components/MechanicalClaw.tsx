@@ -788,9 +788,13 @@ function TrolleyMechanism({
   );
 }
 
-export function OverheadRails() {
+export function OverheadRails({
+  showVisuals = true,
+}: {
+  showVisuals?: boolean;
+}) {
   return (
-    <group>
+    <group name="overhead-rail-render-meshes" visible={showVisuals}>
       {[-2.56, 2.56].map((x) => (
         <group key={x}>
           <mesh castShadow position={[x, 4.02, 0]}>
@@ -838,7 +842,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const drumRef = useRef<THREE.Mesh>(null);
   const plungerRef = useRef<THREE.Group>(null);
   const umbilicalRef = useRef<THREE.InstancedMesh>(null);
-  const debugTensionRef = useRef<THREE.Mesh>(null);
   const closure = useRef(0);
   const cableLength = useRef(MIN_CABLE_LENGTH);
   const trolleyPosition = useRef({ x: 0, z: 0 });
@@ -1142,10 +1145,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       umbilicalRef.current.instanceMatrix.needsUpdate = true;
     }
 
-    if (debugTensionRef.current) {
-      setMeshBetween(debugTensionRef.current, anchor, attachment);
-    }
-
     if (frameAccumulator.current >= 0.5) {
       const fps = Math.round(frameCount.current / frameAccumulator.current);
       state.updateMetrics({
@@ -1167,11 +1166,13 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
 
   return (
     <>
-      <TrolleyMechanism
-        gantryRef={gantryRef}
-        trolleyRef={trolleyRef}
-        drumRef={drumRef}
-      />
+      <group name="trolley-render-meshes" visible={!debug}>
+        <TrolleyMechanism
+          gantryRef={gantryRef}
+          trolleyRef={trolleyRef}
+          drumRef={drumRef}
+        />
+      </group>
       <RigidBody
         ref={anchorRef}
         type="kinematicPosition"
@@ -1180,24 +1181,20 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         name="winch-rope-anchor"
       />
 
-      <mesh ref={cableRef} castShadow>
-        <cylinderGeometry args={[0.012, 0.012, 1, 10]} />
-        <meshStandardMaterial color="#7b1f27" metalness={0.42} roughness={0.42} />
-      </mesh>
-      <instancedMesh
-        ref={umbilicalRef}
-        args={[undefined, undefined, UMBILICAL_SEGMENTS]}
-        castShadow
-      >
-        <cylinderGeometry args={[0.021, 0.021, 1, 7]} />
-        <meshStandardMaterial color="#171918" roughness={0.7} />
-      </instancedMesh>
-      {debug && (
-        <mesh ref={debugTensionRef}>
-          <cylinderGeometry args={[0.008, 0.008, 1, 6]} />
-          <meshBasicMaterial color="#3aff8e" transparent opacity={0.7} />
+      <group name="cable-render-meshes" visible={!debug}>
+        <mesh ref={cableRef} castShadow>
+          <cylinderGeometry args={[0.012, 0.012, 1, 10]} />
+          <meshStandardMaterial color="#7b1f27" metalness={0.42} roughness={0.42} />
         </mesh>
-      )}
+        <instancedMesh
+          ref={umbilicalRef}
+          args={[undefined, undefined, UMBILICAL_SEGMENTS]}
+          castShadow
+        >
+          <cylinderGeometry args={[0.021, 0.021, 1, 7]} />
+          <meshStandardMaterial color="#171918" roughness={0.7} />
+        </instancedMesh>
+      </group>
 
       <RigidBody
         ref={housingRef}
@@ -1226,6 +1223,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
           collisionGroups={HOUSING_COLLISION_GROUPS}
         />
 
+        <group name="claw-render-meshes" visible={!debug}>
         <mesh castShadow position={[0, 0.29, 0]}>
           <cylinderGeometry args={[0.17, 0.205, 0.25, 32]} />
           <meshStandardMaterial
@@ -1368,6 +1366,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
             fingerRef={fingerVisualRefs[index]}
           />
         ))}
+        </group>
       </RigidBody>
 
       <ClawLinkageDriver

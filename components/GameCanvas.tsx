@@ -8,6 +8,7 @@ import {
   OrbitControls,
 } from "@react-three/drei";
 import SceneContent from "./MachineScene";
+import { useGameStore } from "@/game/store";
 
 function StudioEnvironment() {
   return (
@@ -36,6 +37,8 @@ function StudioEnvironment() {
 }
 
 export default function GameCanvas() {
+  const debug = useGameStore((state) => state.debug);
+
   return (
     <Canvas
       shadows
@@ -57,15 +60,17 @@ export default function GameCanvas() {
         rotateSpeed={0.62}
         zoomSpeed={0.72}
       />
-      <StudioEnvironment />
+      {!debug && <StudioEnvironment />}
       <SceneContent />
-      <ContactShadows
-        position={[0, -0.25, 0]}
-        opacity={0.28}
-        scale={9}
-        blur={2.4}
-        far={4}
-      />
+      {!debug && (
+        <ContactShadows
+          position={[0, -0.25, 0]}
+          opacity={0.28}
+          scale={9}
+          blur={2.4}
+          far={4}
+        />
+      )}
     </Canvas>
   );
 }
