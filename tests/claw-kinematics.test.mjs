@@ -100,8 +100,6 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
     "utf8",
   );
   assert.doesNotMatch(source, /applyGripAssist|gripRadius|grabbed\.current/);
-  assert.match(source, /configureMotorPosition/);
-  assert.match(source, /MotorModel\.ForceBased/);
   assert.match(source, /createFingerStripGeometry/);
   assert.doesNotMatch(source, /<tubeGeometry/);
   assert.match(source, /umbilicalRef/);
@@ -113,20 +111,25 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
     source,
     /connectorRefOne|connectorLength|connectorPoint/,
   );
-  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 3);
-  assert.equal(source.match(/usePrismaticJoint\(/g)?.length, 1);
   assert.match(source, /claw-central-plunger/);
   assert.doesNotMatch(source, /proximalLength|distalLength|bendAngle|shape\.knee/);
   assert.match(source, /JointData\.rope\(\s*cableLength\.current/);
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);
 });
 
-test("hot reload rebuilds the complete closed-chain physics world", async () => {
+test("the complete linkage follows the suspended housing pose", async () => {
   const source = await readFile(
     new URL("../components/MechanicalClaw.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /hotModule\.dispose/);
-  assert.match(source, /useGameStore\.getState\(\)\.reset\(\)/);
+  assert.match(source, /function ClawLinkageDriver/);
+  assert.equal(source.match(/type="kinematicPosition"/g)?.length, 4);
+  assert.match(source, /setNextKinematicTranslation/);
+  assert.match(source, /setNextKinematicRotation/);
+  assert.match(
+    source,
+    /applyQuaternion\(housingQuaternion\)\.add\(housingPosition\)/,
+  );
+  assert.doesNotMatch(source, /useRevoluteJoint|usePrismaticJoint/);
 });
