@@ -116,7 +116,7 @@ export default function ClawLab() {
               <GameCanvas />
 
               <div className="viewport-badge">
-                <span>HYBRID LINKAGE</span>
+                <span>CLOSED LOOP LINKAGE</span>
                 RAPIER · 60 HZ
               </div>
               <div className="camera-hint" aria-hidden="true">
@@ -145,6 +145,10 @@ export default function ClawLab() {
                     <div>
                       <dt>TIP GAP</dt>
                       <dd>{metrics.tipClearance.toFixed(0)} mm</dd>
+                    </div>
+                    <div>
+                      <dt>PLUNGER FORCE</dt>
+                      <dd>{metrics.plungerForce.toFixed(1)} N</dd>
                     </div>
                   </dl>
                 </div>

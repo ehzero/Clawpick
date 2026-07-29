@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  bodyVelocityForAttachmentTarget,
-  computeSuspensionTiltTorque,
   measureInextensibleCable,
   projectInextensibleCableVelocity,
 } from "../game/cableDynamics.mjs";
@@ -24,13 +22,6 @@ test("the raised claw retracts almost all visible cable", async () => {
 
   assert.ok(minimumLength <= 0.05);
   assert.ok(attachmentY >= 0.36);
-  assert.match(source, /enabledRotations=\{\[true, true, true\]\}/);
-  assert.match(source, /computeSuspensionTiltTorque/);
-  assert.match(source, /housing\.addTorque\(tiltControl\.torque, true\)/);
-  assert.doesNotMatch(
-    source,
-    /enabledRotations=\{\[false, true, false\]\}/,
-  );
 });
 
 function radialRate(direction, anchorVelocity, attachmentVelocity) {
@@ -97,39 +88,4 @@ test("radial projection preserves tangential swing velocity", () => {
   assert.equal(projected.velocity.x, 2.4);
   assert.equal(projected.velocity.z, -1.1);
   assert.equal(projected.velocity.y, 0);
-});
-
-test("attachment projection preserves rotational point velocity", () => {
-  const bodyVelocity = bodyVelocityForAttachmentTarget({
-    bodyVelocity: { x: 1, y: 0, z: 0 },
-    attachmentVelocity: { x: 1.4, y: 0, z: -0.3 },
-    targetAttachmentVelocity: { x: 0.2, y: -0.5, z: 0.1 },
-  });
-
-  assert.ok(Math.abs(bodyVelocity.x + 0.2) < 1e-9);
-  assert.equal(bodyVelocity.y, -0.5);
-  assert.equal(bodyVelocity.z, 0.4);
-});
-
-test("soft tilt control limits pitch and roll without restoring yaw", () => {
-  const angle = Math.PI / 6;
-  const tilted = computeSuspensionTiltTorque({
-    bodyUp: { x: 0, y: Math.cos(angle), z: Math.sin(angle) },
-    angularVelocity: { x: 0, y: 4, z: 0 },
-    swingDamping: 0.8,
-  });
-
-  assert.ok(Math.abs(tilted.tiltAngle - angle) < 1e-9);
-  assert.ok(tilted.torque.x < 0);
-  assert.equal(tilted.torque.y, 0);
-  assert.ok(Math.abs(tilted.torque.z) < 1e-9);
-
-  const upright = computeSuspensionTiltTorque({
-    bodyUp: { x: 0, y: 1, z: 0 },
-    angularVelocity: { x: 1, y: 3, z: -1 },
-    swingDamping: 0.8,
-  });
-  assert.ok(upright.torque.x < 0);
-  assert.equal(upright.torque.y, 0);
-  assert.ok(upright.torque.z > 0);
 });

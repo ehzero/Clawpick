@@ -35,7 +35,7 @@ export function Prize({ id, index, position, registerBody }: PrizeProps) {
       ref={(body) => registerBody(id, body)}
       colliders={false}
       position={position}
-      linearDamping={0.34}
+      linearDamping={settings.prizeLinearDamping}
       angularDamping={settings.angularDamping}
       canSleep
       ccd

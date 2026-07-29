@@ -12,14 +12,16 @@ export type GameResult = "win" | "lose" | null;
 
 export interface PhysicsSettings {
   moveSpeed: number;
+  trolleyAcceleration: number;
   lowerSpeed: number;
   liftSpeed: number;
-  closeSpeed: number;
-  clawStrength: number;
+  plungerSpeed: number;
+  plungerMaxForce: number;
   clawFriction: number;
-  swingDamping: number;
+  swingLinearDamping: number;
   prizeMass: number;
   prizeFriction: number;
+  prizeLinearDamping: number;
   angularDamping: number;
   gravity: number;
 }
@@ -34,6 +36,7 @@ export interface PerformanceMetrics {
   cableDistance: number;
   swingAngle: number;
   tipClearance: number;
+  plungerForce: number;
 }
 
 export interface SessionEvent {

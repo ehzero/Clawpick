@@ -8,7 +8,11 @@ import {
   SlidersHorizontal,
   Upload,
 } from "lucide-react";
-import { DEFAULT_SETTINGS, useGameStore } from "@/game/store";
+import {
+  PHYSICS_SETTING_LIMITS,
+  normalizePhysicsSettings,
+  useGameStore,
+} from "@/game/store";
 import type { PhysicsSettings } from "@/game/types";
 
 interface SliderProps {
@@ -59,7 +63,9 @@ function downloadJson(name: string, data: unknown) {
 }
 
 export function TuningPanel() {
-  const [tab, setTab] = useState<"claw" | "prize">("claw");
+  const [tab, setTab] = useState<"claw" | "prize" | "environment">(
+    "claw",
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const settings = useGameStore((state) => state.settings);
   const replaceSettings = useGameStore((state) => state.replaceSettings);
@@ -70,7 +76,7 @@ export function TuningPanel() {
     const saved = localStorage.getItem("clawpick-settings");
     if (!saved) return;
     try {
-      replaceSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(saved) });
+      replaceSettings(normalizePhysicsSettings(JSON.parse(saved)));
     } catch {
       localStorage.removeItem("clawpick-settings");
     }
@@ -83,13 +89,30 @@ export function TuningPanel() {
   const importPreset = async (file?: File) => {
     if (!file) return;
     try {
-      const parsed = JSON.parse(await file.text()) as Partial<PhysicsSettings>;
-      const next = { ...DEFAULT_SETTINGS, ...parsed };
-      const valid = Object.values(next).every(
-        (value) => typeof value === "number" && Number.isFinite(value),
+      const parsed = JSON.parse(await file.text()) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Invalid preset");
+      }
+      const record = parsed as Record<string, unknown>;
+      const knownKeys = new Set([
+        ...Object.keys(PHYSICS_SETTING_LIMITS),
+        "closeSpeed",
+        "clawStrength",
+        "swingDamping",
+      ]);
+      const suppliedSettings = Object.entries(record).filter(([key]) =>
+        knownKeys.has(key),
       );
-      if (!valid) throw new Error("Invalid preset");
-      replaceSettings(next);
+      if (
+        suppliedSettings.length === 0 ||
+        suppliedSettings.some(
+          ([, value]) =>
+            typeof value !== "number" || !Number.isFinite(value),
+        )
+      ) {
+        throw new Error("Invalid preset");
+      }
+      replaceSettings(normalizePhysicsSettings(parsed));
     } catch {
       record("preset_import_failed");
       window.alert("올바른 Clawpick 프리셋 파일이 아닙니다.");
@@ -111,7 +134,7 @@ export function TuningPanel() {
           type="button"
           onClick={() =>
             downloadJson("clawpick-preset.json", {
-              version: 1,
+              version: 2,
               ...settings,
             })
           }
@@ -154,25 +177,39 @@ export function TuningPanel() {
         >
           인형
         </button>
+        <button
+          type="button"
+          className={tab === "environment" ? "active" : ""}
+          onClick={() => setTab("environment")}
+          role="tab"
+          aria-selected={tab === "environment"}
+        >
+          환경
+        </button>
       </div>
 
       <div className="slider-list">
         {tab === "claw" ? (
           <>
-            <Slider label="이동 속도" setting="moveSpeed" min={0.5} max={2.5} step={0.05} unit=" m/s" />
-            <Slider label="하강 속도" setting="lowerSpeed" min={0.4} max={2} step={0.05} unit=" m/s" />
-            <Slider label="상승 속도" setting="liftSpeed" min={0.4} max={2} step={0.05} unit=" m/s" />
-            <Slider label="닫힘 속도" setting="closeSpeed" min={0.4} max={2.8} step={0.05} />
-            <Slider label="파지 강도" setting="clawStrength" min={4} max={34} step={0.5} unit=" N" />
-            <Slider label="집게 마찰" setting="clawFriction" min={0.1} max={2} step={0.05} />
-            <Slider label="흔들림 감쇠" setting="swingDamping" min={0.1} max={2} step={0.05} />
+            <Slider label="트롤리 최고 속도" setting="moveSpeed" min={0.4} max={2.5} step={0.05} unit=" m/s" />
+            <Slider label="트롤리 가속도" setting="trolleyAcceleration" min={1} max={10} step={0.1} unit=" m/s²" />
+            <Slider label="와이어 하강 속도" setting="lowerSpeed" min={0.2} max={2} step={0.05} unit=" m/s" />
+            <Slider label="와이어 상승 속도" setting="liftSpeed" min={0.2} max={2} step={0.05} unit=" m/s" />
+            <Slider label="플런저 속도" setting="plungerSpeed" min={0.04} max={0.35} step={0.01} unit=" m/s" />
+            <Slider label="플런저 최대 축력" setting="plungerMaxForce" min={4} max={40} step={0.5} unit=" N" />
+            <Slider label="손가락 마찰계수" setting="clawFriction" min={0.1} max={2} step={0.05} unit=" μ" />
+            <Slider label="진자 선형 감쇠" setting="swingLinearDamping" min={0.05} max={1.2} step={0.01} unit=" s⁻¹" />
+          </>
+        ) : tab === "prize" ? (
+          <>
+            <Slider label="인형 질량" setting="prizeMass" min={0.15} max={1.2} step={0.01} unit=" kg" />
+            <Slider label="표면 마찰계수" setting="prizeFriction" min={0.1} max={1.5} step={0.05} unit=" μ" />
+            <Slider label="선형 감쇠" setting="prizeLinearDamping" min={0.05} max={1.5} step={0.05} unit=" s⁻¹" />
+            <Slider label="회전 감쇠" setting="angularDamping" min={0} max={2} step={0.05} unit=" s⁻¹" />
           </>
         ) : (
           <>
-            <Slider label="인형 질량" setting="prizeMass" min={0.15} max={1.2} step={0.01} unit=" kg" />
-            <Slider label="표면 마찰" setting="prizeFriction" min={0.1} max={1.5} step={0.05} />
-            <Slider label="회전 감쇠" setting="angularDamping" min={0} max={2} step={0.05} />
-            <Slider label="중력" setting="gravity" min={-14} max={-5} step={0.05} unit=" m/s²" />
+            <Slider label="중력" setting="gravity" min={-14} max={-5} step={0.01} unit=" m/s²" />
           </>
         )}
       </div>
@@ -180,8 +217,8 @@ export function TuningPanel() {
       <div className="tuning-note">
         <Gauge size={17} />
         <p>
-          값은 즉시 적용됩니다. 질량과 중력을 바꾼 뒤에는 새 라운드를 시작해
-          정확히 비교하세요.
+          속도·가속도·힘·질량은 SI 단위입니다. 질량과 중력을 바꾼 뒤에는
+          새 라운드를 시작해 정확히 비교하세요.
         </p>
       </div>
     </aside>

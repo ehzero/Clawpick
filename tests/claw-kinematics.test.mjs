@@ -141,46 +141,57 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);
 });
 
-test("the complete linkage follows the suspended housing pose", async () => {
+test("the complete linkage is a motor-driven dynamic closed loop", async () => {
   const source = await readFile(
     new URL("../components/MechanicalClaw.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /function ClawLinkageDriver/);
+  assert.match(source, /function ClawClosedLinkage/);
+  assert.match(source, /function FingerClosedLoopJoints/);
   assert.match(source, /const plungerY = useRef<number>/);
   assert.doesNotMatch(source, /closure\.current/);
-  assert.match(source, /getClawPoseFromPlungerY\(plungerY\.current\)/);
-  assert.match(source, /setNextKinematicTranslation/);
-  assert.match(source, /setNextKinematicRotation/);
+  assert.match(source, /usePrismaticJoint/);
+  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 3);
+  assert.match(source, /computeForceLimitedActuator/);
+  assert.match(source, /plunger\.addForce\(force, true\)/);
+  assert.doesNotMatch(source, /configureMotorPosition/);
+  assert.match(
+    source,
+    /targetPlungerY\.current - CLAW_GEOMETRY\.openPlungerY/,
+  );
   assert.match(source, /function RockerLink/);
   assert.match(source, /function RockerLinkCollider/);
   assert.match(source, /function PlungerVisual/);
   assert.match(source, /function PlungerCollider/);
   assert.match(source, /function ClawFingerVisual/);
   assert.match(source, /function ClawFingerCollider/);
-  assert.match(source, /const FINGER_COLLIDER_SEGMENTS = 12/);
-  assert.match(source, /linkage\.curve\.getPoints\(FINGER_COLLIDER_SEGMENTS\)/);
+  assert.match(source, /const FINGER_PATH_SEGMENTS = 24/);
+  assert.match(source, /linkage\.curve\.getPoints\(FINGER_PATH_SEGMENTS\)/);
   assert.match(source, /name="claw-plunger-collider"/);
   assert.match(source, /name=\{`claw-rocker-collider-\$\{index \+ 1\}`\}/);
+  assert.match(source, /<PlungerVisual \/>/);
+  assert.match(source, /<RockerLink index=\{index\} \/>/);
+  assert.match(source, /<ClawFingerVisual index=\{index\} \/>/);
   assert.match(
     source,
-    /<group ref=\{rockerRef\} position=\{shape\.housingPivot\}>/,
-  );
-  assert.match(source, /rocker\?\.quaternion\.copy\(rockerLocalRotation\)/);
-  assert.match(source, /plunger\.position\.set\(0, pose\.plungerY, 0\)/);
-  assert.match(source, /plungerCollider\.setNextKinematicTranslation/);
-  assert.match(source, /rockerCollider\.setNextKinematicRotation/);
-  assert.match(source, /fingerVisual\.position\.copy\(fingerLocalPosition\)/);
-  assert.match(
-    source,
-    /<PlungerVisual plungerRef=\{plungerRef\} \/>[\s\S]*<ClawFingerVisual/,
+    /useRevoluteJoint\(\s*housingRef as RefObject<RapierRigidBody>,\s*rockerRef/,
   );
   assert.match(
     source,
-    /applyQuaternion\(housingQuaternion\)\.add\(housingPosition\)/,
+    /useRevoluteJoint\(\s*rockerRef as RefObject<RapierRigidBody>,\s*fingerRef/,
   );
-  assert.doesNotMatch(source, /useRevoluteJoint|usePrismaticJoint/);
+  assert.match(
+    source,
+    /useRevoluteJoint\(\s*fingerRef as RefObject<RapierRigidBody>,\s*plungerRef/,
+  );
+  assert.doesNotMatch(source, /function ClawLinkageDriver/);
+  assert.doesNotMatch(
+    source,
+    /type="kinematicPosition"[\s\S]{0,220}claw-(?:plunger|rocker|finger)-collider/,
+  );
+  assert.match(source, /interactionGroups\(\[2\], \[0\]\)/);
+  assert.doesNotMatch(source, /interactionGroups\(\[2\], \[0, 2\]\)/);
 });
 
 test("housing seams use horizontal collars instead of vertical torus rings", async () => {

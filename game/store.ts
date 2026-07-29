@@ -11,17 +11,102 @@ import type {
 
 export const DEFAULT_SETTINGS: PhysicsSettings = {
   moveSpeed: 1.35,
+  trolleyAcceleration: 5.2,
   lowerSpeed: 1.1,
   liftSpeed: 1.25,
-  closeSpeed: 1.35,
-  clawStrength: 18,
+  plungerSpeed: 0.19,
+  plungerMaxForce: 18,
   clawFriction: 1.25,
-  swingDamping: 0.72,
+  swingLinearDamping: 0.38,
   prizeMass: 0.38,
   prizeFriction: 0.78,
+  prizeLinearDamping: 0.34,
   angularDamping: 0.55,
   gravity: -9.81,
 };
+
+export const PHYSICS_SETTING_LIMITS: Record<
+  keyof PhysicsSettings,
+  { min: number; max: number }
+> = {
+  moveSpeed: { min: 0.4, max: 2.5 },
+  trolleyAcceleration: { min: 1, max: 10 },
+  lowerSpeed: { min: 0.2, max: 2 },
+  liftSpeed: { min: 0.2, max: 2 },
+  plungerSpeed: { min: 0.04, max: 0.35 },
+  plungerMaxForce: { min: 4, max: 40 },
+  clawFriction: { min: 0.1, max: 2 },
+  swingLinearDamping: { min: 0.05, max: 1.2 },
+  prizeMass: { min: 0.15, max: 1.2 },
+  prizeFriction: { min: 0.1, max: 1.5 },
+  prizeLinearDamping: { min: 0.05, max: 1.5 },
+  angularDamping: { min: 0, max: 2 },
+  gravity: { min: -14, max: -5 },
+};
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function clampSetting(
+  key: keyof PhysicsSettings,
+  value: number,
+) {
+  const { min, max } = PHYSICS_SETTING_LIMITS[key];
+  return Math.min(max, Math.max(min, value));
+}
+
+export function normalizePhysicsSettings(
+  input: unknown,
+): PhysicsSettings {
+  const source =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const read = (
+    key: keyof PhysicsSettings,
+    legacyValue?: number,
+  ) =>
+    clampSetting(
+      key,
+      finiteNumber(source[key]) ??
+        legacyValue ??
+        DEFAULT_SETTINGS[key],
+    );
+  const legacyCloseSpeed = finiteNumber(source.closeSpeed);
+  const legacySwingDamping = finiteNumber(source.swingDamping);
+
+  return {
+    moveSpeed: read("moveSpeed"),
+    trolleyAcceleration: read("trolleyAcceleration"),
+    lowerSpeed: read("lowerSpeed"),
+    liftSpeed: read("liftSpeed"),
+    plungerSpeed: read(
+      "plungerSpeed",
+      legacyCloseSpeed === undefined
+        ? undefined
+        : legacyCloseSpeed * 0.142,
+    ),
+    plungerMaxForce: read(
+      "plungerMaxForce",
+      finiteNumber(source.clawStrength),
+    ),
+    clawFriction: read("clawFriction"),
+    swingLinearDamping: read(
+      "swingLinearDamping",
+      legacySwingDamping === undefined
+        ? undefined
+        : 0.18 + legacySwingDamping * 0.28,
+    ),
+    prizeMass: read("prizeMass"),
+    prizeFriction: read("prizeFriction"),
+    prizeLinearDamping: read("prizeLinearDamping"),
+    angularDamping: read("angularDamping"),
+    gravity: read("gravity"),
+  };
+}
 
 const defaultMetrics: PerformanceMetrics = {
   fps: 60,
@@ -33,6 +118,7 @@ const defaultMetrics: PerformanceMetrics = {
   cableDistance: 0,
   swingAngle: 0,
   tipClearance: 0,
+  plungerForce: 0,
 };
 
 interface GameStore {
@@ -145,11 +231,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   updateSetting: (key, value) => {
     const state = get();
+    const nextValue = clampSetting(key, value);
     set({
-      settings: { ...state.settings, [key]: value },
+      settings: { ...state.settings, [key]: nextValue },
       events: [
         ...state.events,
-        event(state.startedAt, "setting_changed", { key, value }),
+        event(state.startedAt, "setting_changed", {
+          key,
+          value: nextValue,
+        }),
       ].slice(-400),
     });
   },
@@ -157,7 +247,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   replaceSettings: (settings) => {
     const state = get();
     set({
-      settings,
+      settings: normalizePhysicsSettings(settings),
       events: [
         ...state.events,
         event(state.startedAt, "preset_imported"),
