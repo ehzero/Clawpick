@@ -37,9 +37,11 @@ test("server-renders the Clawpick physics lab shell", async () => {
   assert.match(html, /DRAG TO ORBIT/);
   assert.match(html, /8-WAY · HOLD &amp; DRAG/);
   assert.match(html, /물리 튜닝/);
-  assert.match(html, /플런저 최대 축력/);
-  assert.match(html, /트롤리 가속도/);
-  assert.match(html, /진자 선형 감쇠/);
+  assert.match(html, /간단 설정/);
+  assert.match(html, /고급 설정/);
+  assert.match(html, /파지력/);
+  assert.match(html, /작동 속도/);
+  assert.match(html, /안정성/);
   assert.match(html, />환경</);
   assert.doesNotMatch(html, /react-loading-skeleton/i);
 });

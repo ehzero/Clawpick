@@ -10,15 +10,27 @@ export type GamePhase =
 
 export type GameResult = "win" | "lose" | null;
 
+export type ManualPlungerState = "open" | "closed";
+
+export type ManualCableDirection = "lower" | "raise" | null;
+
 export interface PhysicsSettings {
   moveSpeed: number;
   trolleyAcceleration: number;
+  returnSpeedMultiplier: number;
+  returnAccelerationMultiplier: number;
   lowerSpeed: number;
   liftSpeed: number;
+  cableRetractedLength: number;
+  cableExtendedLength: number;
   plungerSpeed: number;
   plungerMaxForce: number;
+  plungerPositionTolerance: number;
+  plungerVelocityTolerance: number;
+  plungerStallTimeout: number;
   clawFriction: number;
   swingLinearDamping: number;
+  housingAngularDamping: number;
   prizeMass: number;
   prizeFriction: number;
   prizeLinearDamping: number;
@@ -37,6 +49,8 @@ export interface PerformanceMetrics {
   swingAngle: number;
   tipClearance: number;
   plungerForce: number;
+  plungerStroke: number;
+  plungerVelocity: number;
 }
 
 export interface SessionEvent {

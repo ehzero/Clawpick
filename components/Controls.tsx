@@ -1,7 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleDot } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  CircleDot,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
+import type {
+  ManualPlungerState,
+} from "@/game/types";
 import {
   clampJoystickOffset,
   getEightWayInput,
@@ -151,6 +165,92 @@ function EightWayJoystick() {
   );
 }
 
+function ManualMechanismControls() {
+  const phase = useGameStore((state) => state.phase);
+  const manualPlungerState = useGameStore(
+    (state) => state.manualPlungerState,
+  );
+  const manualCableDirection = useGameStore(
+    (state) => state.manualCableDirection,
+  );
+  const setManualPlungerState = useGameStore(
+    (state) => state.setManualPlungerState,
+  );
+  const setManualCableDirection = useGameStore(
+    (state) => state.setManualCableDirection,
+  );
+  const enabled = phase === "aiming";
+
+  const plungerButtons: Array<{
+    state: ManualPlungerState;
+    label: string;
+    icon: typeof Maximize2;
+  }> = [
+    { state: "open", label: "펼침", icon: Maximize2 },
+    { state: "closed", label: "접힘", icon: Minimize2 },
+  ];
+
+  return (
+    <div className="manual-mechanism-controls">
+      <section className="manual-control-group">
+        <span className="control-kicker">WIRE</span>
+        <div role="group" aria-label="와이어 수동 승강">
+          {[
+            {
+              direction: "lower" as const,
+              label: "하강",
+              icon: ArrowDown,
+            },
+            {
+              direction: "raise" as const,
+              label: "상승",
+              icon: ArrowUp,
+            },
+          ].map(({ direction, label, icon: Icon }) => (
+            <button
+              key={direction}
+              type="button"
+              className={
+                manualCableDirection === direction ? "active" : ""
+              }
+              aria-label={`와이어 ${label}`}
+              aria-pressed={manualCableDirection === direction}
+              disabled={!enabled}
+              onClick={() =>
+                setManualCableDirection(
+                  manualCableDirection === direction ? null : direction,
+                )
+              }
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="manual-control-group">
+        <span className="control-kicker">CLAW</span>
+        <div role="group" aria-label="집게 수동 상태">
+          {plungerButtons.map(({ state, label, icon: Icon }) => (
+            <button
+              key={state}
+              type="button"
+              className={manualPlungerState === state ? "active" : ""}
+              aria-pressed={manualPlungerState === state}
+              disabled={!enabled}
+              onClick={() => setManualPlungerState(state)}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function Controls() {
   const phase = useGameStore((state) => state.phase);
   const drop = useGameStore((state) => state.drop);
@@ -169,6 +269,12 @@ export function Controls() {
     };
     const down = (event: KeyboardEvent) => {
       if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("button, input, select, textarea")
+      ) {
+        return;
+      }
+      if (
         ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(
           event.code,
         )
@@ -183,6 +289,12 @@ export function Controls() {
       sync();
     };
     const up = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("button, input, select, textarea")
+      ) {
+        return;
+      }
       pressed.delete(event.code);
       sync();
     };
@@ -196,12 +308,15 @@ export function Controls() {
 
   return (
     <div className="control-deck">
-      <div>
-        <div className="control-kicker">
-          MOVE CLAW
-          <span className="joystick-mode">8-WAY · HOLD &amp; DRAG</span>
+      <div className="control-operation-cluster">
+        <div className="joystick-control">
+          <div className="control-kicker">
+            MOVE CLAW
+            <span className="joystick-mode">8-WAY · HOLD &amp; DRAG</span>
+          </div>
+          <EightWayJoystick key={phase} />
         </div>
-        <EightWayJoystick key={phase} />
+        <ManualMechanismControls />
       </div>
 
       <div className="drop-control">

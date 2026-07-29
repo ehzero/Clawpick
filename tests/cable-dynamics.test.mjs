@@ -55,13 +55,18 @@ test("winch speed is imposed directly without elastic oscillation", () => {
   const projected = projectInextensibleCableVelocity({
     direction,
     anchorVelocity: ZERO,
+    bodyLinearVelocity: { x: 0, y: -0.5, z: 0 },
     attachmentVelocity: { x: 0, y: -0.5, z: 0 },
     targetLengthRate: -1.25,
   });
 
   assert.ok(
     Math.abs(
-      radialRate(direction, ZERO, projected.velocity) - (-1.25),
+      radialRate(
+        direction,
+        ZERO,
+        projected.attachmentVelocity,
+      ) - (-1.25),
     ) < 1e-9,
   );
 });
@@ -81,11 +86,75 @@ test("radial projection preserves tangential swing velocity", () => {
   const projected = projectInextensibleCableVelocity({
     direction,
     anchorVelocity: ZERO,
+    bodyLinearVelocity: { x: 2.4, y: -0.8, z: -1.1 },
     attachmentVelocity: { x: 2.4, y: -0.8, z: -1.1 },
     targetLengthRate: 0,
   });
 
-  assert.equal(projected.velocity.x, 2.4);
-  assert.equal(projected.velocity.z, -1.1);
-  assert.equal(projected.velocity.y, 0);
+  assert.equal(projected.bodyLinearVelocity.x, 2.4);
+  assert.equal(projected.bodyLinearVelocity.z, -1.1);
+  assert.equal(projected.bodyLinearVelocity.y, 0);
+});
+
+test("cable projection does not copy attachment rotation into body velocity", () => {
+  const direction = { x: 1, y: 0, z: 0 };
+  const projected = projectInextensibleCableVelocity({
+    direction,
+    anchorVelocity: ZERO,
+    bodyLinearVelocity: ZERO,
+    attachmentVelocity: { x: 2, y: 0, z: 0 },
+    targetLengthRate: 0,
+  });
+
+  assert.equal(projected.radialCorrection, -2);
+  assert.equal(projected.attachmentVelocity.x, 0);
+  assert.equal(projected.bodyLinearVelocity.x, -2);
+});
+
+test("the suspended claw keeps all body rotation axes physical", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /enabledRotations=\{\[true, true, true\]\}/,
+  );
+  assert.match(
+    source,
+    /JointData\.rope\([\s\S]*?\{ x: 0, y: CLAW_ATTACHMENT_Y, z: 0 \}/,
+  );
+  assert.match(
+    source,
+    /HOUSING_COLLISION_GROUPS = interactionGroups\(\[1\], \[0, 4\]\)/,
+  );
+  assert.match(
+    source,
+    /WIRE_GUIDE_COLLISION_GROUPS = interactionGroups\(\[4\], \[1\]\)/,
+  );
+  assert.match(
+    source,
+    /name="winch-rope-anchor"[\s\S]*?<CylinderCollider[\s\S]*?args=\{\[0\.02, 0\.22\]\}[\s\S]*?position=\{\[0, 0\.02, 0\]\}[\s\S]*?collisionGroups=\{WIRE_GUIDE_COLLISION_GROUPS\}/,
+  );
+  assert.match(
+    source,
+    /position=\{\[0, 3\.84, 0\]\}[\s\S]*?<cylinderGeometry args=\{\[0\.22, 0\.22, 0\.08, 24\]\}/,
+  );
+  assert.match(
+    source,
+    /ropeJoint\.current\.setContactsEnabled\(true\)/,
+  );
+  assert.match(
+    source,
+    /bodyLinearVelocity: housing\.linvel\(\)/,
+  );
+  assert.match(
+    source,
+    /projectedVelocity\.bodyLinearVelocity/,
+  );
+  assert.doesNotMatch(
+    source,
+    /setAngvel|applyTorqueImpulse|addTorque/,
+  );
 });

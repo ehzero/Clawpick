@@ -141,7 +141,7 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);
 });
 
-test("the complete linkage is a motor-driven dynamic closed loop", async () => {
+test("the complete linkage is a force-driven dynamic closed loop", async () => {
   const source = await readFile(
     new URL("../components/MechanicalClaw.tsx", import.meta.url),
     "utf8",
@@ -153,9 +153,14 @@ test("the complete linkage is a motor-driven dynamic closed loop", async () => {
   assert.doesNotMatch(source, /closure\.current/);
   assert.match(source, /usePrismaticJoint/);
   assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 3);
-  assert.match(source, /computeForceLimitedActuator/);
-  assert.match(source, /plunger\.addForce\(force, true\)/);
-  assert.doesNotMatch(source, /configureMotorPosition/);
+  assert.match(source, /computeAxialForceCommand/);
+  assert.match(source, /plunger\.addForce\(plungerForce, true\)/);
+  assert.match(
+    source,
+    /housing\.addForce\(housingReactionForce, true\)/,
+  );
+  assert.doesNotMatch(source, /configureMotor/);
+  assert.doesNotMatch(source, /MotorModel/);
   assert.match(
     source,
     /targetPlungerY\.current - CLAW_GEOMETRY\.openPlungerY/,
@@ -225,4 +230,8 @@ test("the housing uses one simple cylindrical collider", async () => {
   assert.match(housingColliders, /args=\{\[0\.31, 0\.22\]\}/);
   assert.match(housingColliders, /position=\{\[0, 0\.09, 0\]\}/);
   assert.match(housingColliders, /mass=\{1\.02\}/);
+  assert.match(
+    housingColliders,
+    /collisionGroups=\{HOUSING_COLLISION_GROUPS\}/,
+  );
 });

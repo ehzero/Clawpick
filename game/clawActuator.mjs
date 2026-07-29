@@ -1,31 +1,39 @@
-export function computeForceLimitedActuator({
-  targetPosition,
-  currentPosition,
+export const END_STOP_FORCE_RAMP_DISTANCE = 0.003;
+export const END_STOP_HOLD_FORCE_RATIO = 0.1;
+
+export function computeAxialForceCommand({
+  direction,
   relativeVelocity,
+  maxSpeed = 0.2,
   maxForce,
-  responseDistance = 0.006,
-  effectiveMass = 0.16,
+  remainingTravel = Number.POSITIVE_INFINITY,
 }) {
   const safeMaxForce = Math.max(0, maxForce);
-  const safeResponseDistance = Math.max(0.0001, responseDistance);
-  const stiffness = safeMaxForce / safeResponseDistance;
-  const damping =
-    2 * Math.sqrt(stiffness * Math.max(0.001, effectiveMass)) * 0.82;
-  const positionError = targetPosition - currentPosition;
-  const requestedForce =
-    positionError * stiffness - relativeVelocity * damping;
-  const force = Math.min(
-    safeMaxForce,
-    Math.max(-safeMaxForce, requestedForce),
+  const normalizedDirection = Math.sign(direction);
+  const speedTowardTarget =
+    relativeVelocity * normalizedDirection;
+  const endStopBlend = Math.min(
+    1,
+    Math.max(0, remainingTravel) /
+      END_STOP_FORCE_RAMP_DISTANCE,
   );
+  const forceScale =
+    END_STOP_HOLD_FORCE_RATIO +
+    (1 - END_STOP_HOLD_FORCE_RATIO) * endStopBlend;
+  const speedLimited =
+    normalizedDirection !== 0 &&
+    speedTowardTarget >= Math.max(0, maxSpeed);
+  const force =
+    normalizedDirection === 0 || speedLimited
+      ? 0
+      : normalizedDirection * safeMaxForce * forceScale;
 
   return {
+    direction: normalizedDirection,
+    speedTowardTarget,
     force,
-    positionError,
-    stiffness,
-    damping,
-    saturated:
-      safeMaxForce > 0 &&
-      Math.abs(requestedForce) >= safeMaxForce,
+    forceScale,
+    atEndStop: endStopBlend === 0,
+    speedLimited,
   };
 }

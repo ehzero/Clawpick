@@ -150,6 +150,14 @@ export default function ClawLab() {
                       <dt>PLUNGER FORCE</dt>
                       <dd>{metrics.plungerForce.toFixed(1)} N</dd>
                     </div>
+                    <div>
+                      <dt>PLUNGER STROKE</dt>
+                      <dd>{metrics.plungerStroke.toFixed(1)} mm</dd>
+                    </div>
+                    <div>
+                      <dt>PLUNGER SPEED</dt>
+                      <dd>{metrics.plungerVelocity.toFixed(3)} m/s</dd>
+                    </div>
                   </dl>
                 </div>
               )}

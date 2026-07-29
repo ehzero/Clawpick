@@ -4,6 +4,8 @@ import { create } from "zustand";
 import type {
   GamePhase,
   GameResult,
+  ManualCableDirection,
+  ManualPlungerState,
   PerformanceMetrics,
   PhysicsSettings,
   SessionEvent,
@@ -12,12 +14,20 @@ import type {
 export const DEFAULT_SETTINGS: PhysicsSettings = {
   moveSpeed: 1.35,
   trolleyAcceleration: 5.2,
+  returnSpeedMultiplier: 0.9,
+  returnAccelerationMultiplier: 0.73,
   lowerSpeed: 1.1,
   liftSpeed: 1.25,
+  cableRetractedLength: 0.04,
+  cableExtendedLength: 1.8,
   plungerSpeed: 0.19,
   plungerMaxForce: 18,
+  plungerPositionTolerance: 0.006,
+  plungerVelocityTolerance: 0.018,
+  plungerStallTimeout: 2.4,
   clawFriction: 1.25,
   swingLinearDamping: 0.38,
+  housingAngularDamping: 0,
   prizeMass: 0.38,
   prizeFriction: 0.78,
   prizeLinearDamping: 0.34,
@@ -31,12 +41,20 @@ export const PHYSICS_SETTING_LIMITS: Record<
 > = {
   moveSpeed: { min: 0.4, max: 2.5 },
   trolleyAcceleration: { min: 1, max: 10 },
+  returnSpeedMultiplier: { min: 0.2, max: 1.2 },
+  returnAccelerationMultiplier: { min: 0.2, max: 1.2 },
   lowerSpeed: { min: 0.2, max: 2 },
   liftSpeed: { min: 0.2, max: 2 },
+  cableRetractedLength: { min: 0.01, max: 0.25 },
+  cableExtendedLength: { min: 0.6, max: 2.2 },
   plungerSpeed: { min: 0.04, max: 0.35 },
-  plungerMaxForce: { min: 4, max: 40 },
+  plungerMaxForce: { min: 4, max: 100 },
+  plungerPositionTolerance: { min: 0.001, max: 0.02 },
+  plungerVelocityTolerance: { min: 0.001, max: 0.06 },
+  plungerStallTimeout: { min: 0.5, max: 5 },
   clawFriction: { min: 0.1, max: 2 },
   swingLinearDamping: { min: 0.05, max: 1.2 },
+  housingAngularDamping: { min: 0, max: 10 },
   prizeMass: { min: 0.15, max: 1.2 },
   prizeFriction: { min: 0.1, max: 1.5 },
   prizeLinearDamping: { min: 0.05, max: 1.5 },
@@ -81,8 +99,12 @@ export function normalizePhysicsSettings(
   return {
     moveSpeed: read("moveSpeed"),
     trolleyAcceleration: read("trolleyAcceleration"),
+    returnSpeedMultiplier: read("returnSpeedMultiplier"),
+    returnAccelerationMultiplier: read("returnAccelerationMultiplier"),
     lowerSpeed: read("lowerSpeed"),
     liftSpeed: read("liftSpeed"),
+    cableRetractedLength: read("cableRetractedLength"),
+    cableExtendedLength: read("cableExtendedLength"),
     plungerSpeed: read(
       "plungerSpeed",
       legacyCloseSpeed === undefined
@@ -93,6 +115,9 @@ export function normalizePhysicsSettings(
       "plungerMaxForce",
       finiteNumber(source.clawStrength),
     ),
+    plungerPositionTolerance: read("plungerPositionTolerance"),
+    plungerVelocityTolerance: read("plungerVelocityTolerance"),
+    plungerStallTimeout: read("plungerStallTimeout"),
     clawFriction: read("clawFriction"),
     swingLinearDamping: read(
       "swingLinearDamping",
@@ -100,6 +125,7 @@ export function normalizePhysicsSettings(
         ? undefined
         : 0.18 + legacySwingDamping * 0.28,
     ),
+    housingAngularDamping: read("housingAngularDamping"),
     prizeMass: read("prizeMass"),
     prizeFriction: read("prizeFriction"),
     prizeLinearDamping: read("prizeLinearDamping"),
@@ -119,6 +145,8 @@ const defaultMetrics: PerformanceMetrics = {
   swingAngle: 0,
   tipClearance: 0,
   plungerForce: 0,
+  plungerStroke: 0,
+  plungerVelocity: 0,
 };
 
 interface GameStore {
@@ -131,16 +159,24 @@ interface GameStore {
   startedAt: number;
   round: number;
   debug: boolean;
+  manualPlungerState: ManualPlungerState;
+  manualCableDirection: ManualCableDirection;
   setInput: (x: number, z: number) => void;
   drop: () => void;
   setPhase: (phase: GamePhase) => void;
   finish: (result: Exclude<GameResult, null>) => void;
   reset: () => void;
   updateSetting: (key: keyof PhysicsSettings, value: number) => void;
+  updateSettings: (
+    values: Partial<PhysicsSettings>,
+    source?: string,
+  ) => void;
   replaceSettings: (settings: PhysicsSettings) => void;
   resetSettings: () => void;
   updateMetrics: (metrics: Partial<PerformanceMetrics>) => void;
   toggleDebug: () => void;
+  setManualPlungerState: (state: ManualPlungerState) => void;
+  setManualCableDirection: (direction: ManualCableDirection) => void;
   record: (
     type: string,
     data?: Record<string, string | number | boolean>,
@@ -165,6 +201,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   startedAt: Date.now(),
   round: 1,
   debug: false,
+  manualPlungerState: "open",
+  manualCableDirection: null,
 
   setInput: (x, z) => {
     const state = get();
@@ -185,6 +223,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({
       phase: "descending",
       input: { x: 0, z: 0 },
+      manualCableDirection: null,
       events: [
         ...state.events,
         event(state.startedAt, "drop_pressed"),
@@ -224,6 +263,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       input: { x: 0, z: 0 },
       startedAt,
       round: state.round + 1,
+      manualPlungerState: "open",
+      manualCableDirection: null,
       metrics: defaultMetrics,
       events: [event(startedAt, "session_started")],
     }));
@@ -239,6 +280,36 @@ export const useGameStore = create<GameStore>((set, get) => ({
         event(state.startedAt, "setting_changed", {
           key,
           value: nextValue,
+        }),
+      ].slice(-400),
+    });
+  },
+
+  updateSettings: (values, source = "batch") => {
+    const state = get();
+    const nextSettings = { ...state.settings };
+    let changed = 0;
+
+    for (const [key, value] of Object.entries(values) as Array<
+      [keyof PhysicsSettings, number]
+    >) {
+      if (!(key in PHYSICS_SETTING_LIMITS) || !Number.isFinite(value)) {
+        continue;
+      }
+      const nextValue = clampSetting(key, value);
+      if (nextSettings[key] === nextValue) continue;
+      nextSettings[key] = nextValue;
+      changed += 1;
+    }
+    if (changed === 0) return;
+
+    set({
+      settings: nextSettings,
+      events: [
+        ...state.events,
+        event(state.startedAt, "settings_batch_changed", {
+          source,
+          changed,
         }),
       ].slice(-400),
     });
@@ -270,6 +341,44 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set((state) => ({ metrics: { ...state.metrics, ...metrics } })),
 
   toggleDebug: () => set((state) => ({ debug: !state.debug })),
+
+  setManualPlungerState: (manualPlungerState) => {
+    const state = get();
+    if (
+      state.phase !== "aiming" ||
+      state.manualPlungerState === manualPlungerState
+    ) {
+      return;
+    }
+    set({
+      manualPlungerState,
+      events: [
+        ...state.events,
+        event(state.startedAt, "manual_plunger_state_changed", {
+          state: manualPlungerState,
+        }),
+      ].slice(-400),
+    });
+  },
+
+  setManualCableDirection: (manualCableDirection) => {
+    const state = get();
+    if (
+      state.phase !== "aiming" ||
+      state.manualCableDirection === manualCableDirection
+    ) {
+      return;
+    }
+    set({
+      manualCableDirection,
+      events: [
+        ...state.events,
+        event(state.startedAt, "manual_cable_direction_changed", {
+          direction: manualCableDirection ?? "stop",
+        }),
+      ].slice(-400),
+    });
+  },
 
   record: (type, data) => {
     const state = get();

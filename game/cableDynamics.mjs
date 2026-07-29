@@ -36,6 +36,7 @@ export function measureInextensibleCable({
 export function projectInextensibleCableVelocity({
   direction,
   anchorVelocity,
+  bodyLinearVelocity,
   attachmentVelocity,
   targetLengthRate,
 }) {
@@ -54,10 +55,15 @@ export function projectInextensibleCableVelocity({
     radialRateBefore: stretchRate,
     targetLengthRate,
     radialCorrection,
-    velocity: {
+    attachmentVelocity: {
       x: attachmentVelocity.x + direction.x * radialCorrection,
       y: attachmentVelocity.y + direction.y * radialCorrection,
       z: attachmentVelocity.z + direction.z * radialCorrection,
+    },
+    bodyLinearVelocity: {
+      x: bodyLinearVelocity.x + direction.x * radialCorrection,
+      y: bodyLinearVelocity.y + direction.y * radialCorrection,
+      z: bodyLinearVelocity.z + direction.z * radialCorrection,
     },
   };
 }

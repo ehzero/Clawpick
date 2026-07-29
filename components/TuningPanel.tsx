@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ChevronDown,
   Download,
   Gauge,
   RotateCcw,
@@ -9,31 +10,234 @@ import {
   Upload,
 } from "lucide-react";
 import {
+  getSimpleClawTuningLevel,
+  getSimpleClawTuningPatch,
+} from "@/game/clawTuning.mjs";
+import {
   PHYSICS_SETTING_LIMITS,
   normalizePhysicsSettings,
   useGameStore,
 } from "@/game/store";
+import {
+  migratePersistedSettings,
+  SETTINGS_STORAGE_VERSION,
+} from "@/game/settingsMigration.mjs";
 import type { PhysicsSettings } from "@/game/types";
 
 interface SliderProps {
   label: string;
   setting: keyof PhysicsSettings;
-  min: number;
-  max: number;
   step: number;
   unit?: string;
 }
 
-function Slider({ label, setting, min, max, step, unit = "" }: SliderProps) {
+type SimpleTuningKind = "grip" | "speed" | "stability";
+
+const SIMPLE_TUNING_CONTROLS: Array<{
+  kind: SimpleTuningKind;
+  label: string;
+  description: string;
+  lowLabel: string;
+  highLabel: string;
+}> = [
+  {
+    kind: "grip",
+    label: "파지력",
+    description: "플런저 최대 축력과 손가락 마찰을 함께 조절합니다.",
+    lowLabel: "약함",
+    highLabel: "강함",
+  },
+  {
+    kind: "speed",
+    label: "작동 속도",
+    description: "플런저 축력이 작용하는 속도 한계를 조절합니다.",
+    lowLabel: "느림",
+    highLabel: "빠름",
+  },
+  {
+    kind: "stability",
+    label: "안정성",
+    description: "집게 몸통의 선형·회전 진동 억제를 함께 조절합니다.",
+    lowLabel: "민감",
+    highLabel: "안정",
+  },
+];
+
+const CLAW_TUNING_SECTIONS: Array<{
+  label: string;
+  items: SliderProps[];
+}> = [
+  {
+    label: "트롤리 이동",
+    items: [
+      {
+        label: "트롤리 최고 속도",
+        setting: "moveSpeed",
+        step: 0.05,
+        unit: " m/s",
+      },
+      {
+        label: "트롤리 가속도",
+        setting: "trolleyAcceleration",
+        step: 0.1,
+        unit: " m/s²",
+      },
+      {
+        label: "복귀 속도 배율",
+        setting: "returnSpeedMultiplier",
+        step: 0.01,
+        unit: " ×",
+      },
+      {
+        label: "복귀 가속도 배율",
+        setting: "returnAccelerationMultiplier",
+        step: 0.01,
+        unit: " ×",
+      },
+    ],
+  },
+  {
+    label: "와이어 승강",
+    items: [
+      {
+        label: "와이어 하강 속도",
+        setting: "lowerSpeed",
+        step: 0.05,
+        unit: " m/s",
+      },
+      {
+        label: "와이어 상승 속도",
+        setting: "liftSpeed",
+        step: 0.05,
+        unit: " m/s",
+      },
+      {
+        label: "수축 와이어 길이",
+        setting: "cableRetractedLength",
+        step: 0.01,
+        unit: " m",
+      },
+      {
+        label: "최대 와이어 길이",
+        setting: "cableExtendedLength",
+        step: 0.05,
+        unit: " m",
+      },
+      {
+        label: "진자 선형 감쇠",
+        setting: "swingLinearDamping",
+        step: 0.01,
+        unit: " s⁻¹",
+      },
+      {
+        label: "몸통 회전 감쇠",
+        setting: "housingAngularDamping",
+        step: 0.01,
+        unit: " s⁻¹",
+      },
+    ],
+  },
+  {
+    label: "플런저 구동",
+    items: [
+      {
+        label: "플런저 속도",
+        setting: "plungerSpeed",
+        step: 0.01,
+        unit: " m/s",
+      },
+      {
+        label: "플런저 최대 축력",
+        setting: "plungerMaxForce",
+        step: 0.5,
+        unit: " N",
+      },
+    ],
+  },
+  {
+    label: "플런저 목표 판정",
+    items: [
+      {
+        label: "위치 허용 오차",
+        setting: "plungerPositionTolerance",
+        step: 0.001,
+        unit: " m",
+      },
+      {
+        label: "속도 허용 오차",
+        setting: "plungerVelocityTolerance",
+        step: 0.001,
+        unit: " m/s",
+      },
+      {
+        label: "부하 정지 제한 시간",
+        setting: "plungerStallTimeout",
+        step: 0.1,
+        unit: " s",
+      },
+    ],
+  },
+  {
+    label: "손가락 접촉",
+    items: [
+      {
+        label: "손가락 마찰계수",
+        setting: "clawFriction",
+        step: 0.05,
+        unit: " μ",
+      },
+    ],
+  },
+];
+
+const PRIZE_TUNING_ITEMS: SliderProps[] = [
+  {
+    label: "인형 질량",
+    setting: "prizeMass",
+    step: 0.01,
+    unit: " kg",
+  },
+  {
+    label: "표면 마찰계수",
+    setting: "prizeFriction",
+    step: 0.05,
+    unit: " μ",
+  },
+  {
+    label: "선형 감쇠",
+    setting: "prizeLinearDamping",
+    step: 0.05,
+    unit: " s⁻¹",
+  },
+  {
+    label: "회전 감쇠",
+    setting: "angularDamping",
+    step: 0.05,
+    unit: " s⁻¹",
+  },
+];
+
+const ENVIRONMENT_TUNING_ITEMS: SliderProps[] = [
+  {
+    label: "중력",
+    setting: "gravity",
+    step: 0.01,
+    unit: " m/s²",
+  },
+];
+
+function Slider({ label, setting, step, unit = "" }: SliderProps) {
   const value = useGameStore((state) => state.settings[setting]);
   const updateSetting = useGameStore((state) => state.updateSetting);
+  const { min, max } = PHYSICS_SETTING_LIMITS[setting];
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step)));
 
   return (
     <label className="slider-field">
       <span>
         <span>{label}</span>
         <output>
-          {value.toFixed(step < 0.1 ? 2 : 1)}
+          {value.toFixed(decimals)}
           {unit}
         </output>
       </span>
@@ -47,6 +251,82 @@ function Slider({ label, setting, min, max, step, unit = "" }: SliderProps) {
         onChange={(event) => updateSetting(setting, Number(event.target.value))}
       />
     </label>
+  );
+}
+
+function SimpleTuningSlider({
+  kind,
+  label,
+  description,
+  lowLabel,
+  highLabel,
+}: (typeof SIMPLE_TUNING_CONTROLS)[number]) {
+  const settings = useGameStore((state) => state.settings);
+  const updateSettings = useGameStore((state) => state.updateSettings);
+  const value = Math.round(getSimpleClawTuningLevel(kind, settings));
+  const descriptionId = `simple-tuning-${kind}-description`;
+
+  return (
+    <label className="simple-slider-field">
+      <span>
+        <span>{label}</span>
+        <output>{value}</output>
+      </span>
+      <small id={descriptionId}>{description}</small>
+      <input
+        aria-label={label}
+        aria-describedby={descriptionId}
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        onChange={(event) => {
+          const level = Number(event.target.value);
+          updateSettings(
+            getSimpleClawTuningPatch(kind, level),
+            `simple_${kind}`,
+          );
+        }}
+      />
+      <span className="simple-slider-range" aria-hidden="true">
+        <span>{lowLabel}</span>
+        <span>{highLabel}</span>
+      </span>
+    </label>
+  );
+}
+
+function TuningSection({
+  label,
+  items,
+  defaultOpen = false,
+}: {
+  label: string;
+  items: SliderProps[];
+  defaultOpen?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <details
+      className="tuning-section"
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>{label}</span>
+        <span>
+          {items.length}개
+          <ChevronDown size={14} aria-hidden="true" />
+        </span>
+      </summary>
+      <div>
+        {items.map((item) => (
+          <Slider key={item.setting} {...item} />
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -66,6 +346,9 @@ export function TuningPanel() {
   const [tab, setTab] = useState<"claw" | "prize" | "environment">(
     "claw",
   );
+  const [settingsMode, setSettingsMode] = useState<"simple" | "advanced">(
+    "simple",
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const settings = useGameStore((state) => state.settings);
   const replaceSettings = useGameStore((state) => state.replaceSettings);
@@ -76,14 +359,27 @@ export function TuningPanel() {
     const saved = localStorage.getItem("clawpick-settings");
     if (!saved) return;
     try {
-      replaceSettings(normalizePhysicsSettings(JSON.parse(saved)));
+      const version = Number(
+        localStorage.getItem("clawpick-settings-version") ?? 0,
+      );
+      replaceSettings(
+        migratePersistedSettings(
+          normalizePhysicsSettings(JSON.parse(saved)),
+          version,
+        ),
+      );
     } catch {
       localStorage.removeItem("clawpick-settings");
+      localStorage.removeItem("clawpick-settings-version");
     }
   }, [replaceSettings]);
 
   useEffect(() => {
     localStorage.setItem("clawpick-settings", JSON.stringify(settings));
+    localStorage.setItem(
+      "clawpick-settings-version",
+      String(SETTINGS_STORAGE_VERSION),
+    );
   }, [settings]);
 
   const importPreset = async (file?: File) => {
@@ -134,7 +430,7 @@ export function TuningPanel() {
           type="button"
           onClick={() =>
             downloadJson("clawpick-preset.json", {
-              version: 2,
+              version: SETTINGS_STORAGE_VERSION,
               ...settings,
             })
           }
@@ -190,27 +486,79 @@ export function TuningPanel() {
 
       <div className="slider-list">
         {tab === "claw" ? (
-          <>
-            <Slider label="트롤리 최고 속도" setting="moveSpeed" min={0.4} max={2.5} step={0.05} unit=" m/s" />
-            <Slider label="트롤리 가속도" setting="trolleyAcceleration" min={1} max={10} step={0.1} unit=" m/s²" />
-            <Slider label="와이어 하강 속도" setting="lowerSpeed" min={0.2} max={2} step={0.05} unit=" m/s" />
-            <Slider label="와이어 상승 속도" setting="liftSpeed" min={0.2} max={2} step={0.05} unit=" m/s" />
-            <Slider label="플런저 속도" setting="plungerSpeed" min={0.04} max={0.35} step={0.01} unit=" m/s" />
-            <Slider label="플런저 최대 축력" setting="plungerMaxForce" min={4} max={40} step={0.5} unit=" N" />
-            <Slider label="손가락 마찰계수" setting="clawFriction" min={0.1} max={2} step={0.05} unit=" μ" />
-            <Slider label="진자 선형 감쇠" setting="swingLinearDamping" min={0.05} max={1.2} step={0.01} unit=" s⁻¹" />
-          </>
+          <div className="claw-settings">
+            <div
+              className="settings-mode-tabs"
+              role="tablist"
+              aria-label="집게 설정 수준"
+            >
+              <button
+                type="button"
+                className={settingsMode === "simple" ? "active" : ""}
+                role="tab"
+                aria-selected={settingsMode === "simple"}
+                aria-controls="simple-claw-settings"
+                onClick={() => setSettingsMode("simple")}
+              >
+                간단 설정
+              </button>
+              <button
+                type="button"
+                className={settingsMode === "advanced" ? "active" : ""}
+                role="tab"
+                aria-selected={settingsMode === "advanced"}
+                aria-controls="advanced-claw-settings"
+                onClick={() => setSettingsMode("advanced")}
+              >
+                고급 설정
+              </button>
+            </div>
+
+            {settingsMode === "simple" ? (
+              <div
+                id="simple-claw-settings"
+                className="simple-settings"
+                role="tabpanel"
+              >
+                <div className="simple-settings-intro">
+                  <strong>핵심 특성만 조정</strong>
+                  <p>
+                    하나의 슬라이더가 관련된 세부 물리값을 함께 조절합니다.
+                  </p>
+                </div>
+                {SIMPLE_TUNING_CONTROLS.map((control) => (
+                  <SimpleTuningSlider key={control.kind} {...control} />
+                ))}
+              </div>
+            ) : (
+              <div
+                id="advanced-claw-settings"
+                className="claw-tuning-sections"
+                role="tabpanel"
+              >
+                {CLAW_TUNING_SECTIONS.map((section, index) => (
+                  <TuningSection
+                    key={section.label}
+                    label={section.label}
+                    items={section.items}
+                    defaultOpen={index === 0}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         ) : tab === "prize" ? (
-          <>
-            <Slider label="인형 질량" setting="prizeMass" min={0.15} max={1.2} step={0.01} unit=" kg" />
-            <Slider label="표면 마찰계수" setting="prizeFriction" min={0.1} max={1.5} step={0.05} unit=" μ" />
-            <Slider label="선형 감쇠" setting="prizeLinearDamping" min={0.05} max={1.5} step={0.05} unit=" s⁻¹" />
-            <Slider label="회전 감쇠" setting="angularDamping" min={0} max={2} step={0.05} unit=" s⁻¹" />
-          </>
+          <TuningSection
+            label="인형 물리"
+            items={PRIZE_TUNING_ITEMS}
+            defaultOpen
+          />
         ) : (
-          <>
-            <Slider label="중력" setting="gravity" min={-14} max={-5} step={0.01} unit=" m/s²" />
-          </>
+          <TuningSection
+            label="환경 물리"
+            items={ENVIRONMENT_TUNING_ITEMS}
+            defaultOpen
+          />
         )}
       </div>
 
