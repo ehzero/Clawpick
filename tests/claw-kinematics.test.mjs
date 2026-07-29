@@ -148,3 +148,16 @@ test("the complete linkage follows the suspended housing pose", async () => {
   );
   assert.doesNotMatch(source, /useRevoluteJoint|usePrismaticJoint/);
 });
+
+test("housing seams use horizontal collars instead of vertical torus rings", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const HOUSING_COLLARS =/);
+  assert.match(source, /HOUSING_COLLARS\.map/);
+  assert.match(source, /collar\.radius/);
+  assert.match(source, /collar\.height/);
+  assert.doesNotMatch(source, /\{\[0\.4, 0\.195, 0\.035, -0\.19\]\.map/);
+});

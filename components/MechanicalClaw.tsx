@@ -52,6 +52,12 @@ const BODY_INITIAL_POSITION: [number, number, number] = [
 const HOUSING_COLLISION_GROUPS = interactionGroups([1], [0]);
 const FINGER_COLLISION_GROUPS = interactionGroups([2], [0, 2]);
 const UMBILICAL_SEGMENTS = 48;
+const HOUSING_COLLARS = [
+  { y: 0.4, radius: 0.18, height: 0.022 },
+  { y: 0.195, radius: 0.232, height: 0.028 },
+  { y: 0.035, radius: 0.232, height: 0.024 },
+  { y: -0.19, radius: 0.248, height: 0.024 },
+] as const;
 
 interface MechanicalClawProps {
   bodies: MutableRefObject<Record<string, RapierRigidBody | null>>;
@@ -1244,10 +1250,19 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
             roughness={0.15}
           />
         </mesh>
-        {[0.4, 0.195, 0.035, -0.19].map((y, index) => (
-          <mesh key={y} castShadow position={[0, y, 0]}>
-            <torusGeometry
-              args={[index === 0 ? 0.145 : index === 3 ? 0.19 : 0.205, 0.018, 8, 28]}
+        {HOUSING_COLLARS.map((collar) => (
+          <mesh
+            key={collar.y}
+            castShadow
+            position={[0, collar.y, 0]}
+          >
+            <cylinderGeometry
+              args={[
+                collar.radius,
+                collar.radius,
+                collar.height,
+                32,
+              ]}
             />
             <meshStandardMaterial
               color="#aeb3b0"
