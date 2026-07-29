@@ -57,16 +57,22 @@ interface MechanicalClawProps {
   bodies: MutableRefObject<Record<string, RapierRigidBody | null>>;
 }
 
-interface ClawFingerProps {
+interface ClawFingerVisualProps {
+  index: number;
+  fingerRef: RefObject<THREE.Group | null>;
+}
+
+interface ClawFingerColliderProps {
   index: number;
   fingerRef: RefObject<RapierRigidBody | null>;
 }
 
 interface ClawLinkageDriverProps {
   housingRef: RefObject<RapierRigidBody | null>;
-  plungerRef: RefObject<RapierRigidBody | null>;
+  plungerRef: RefObject<THREE.Group | null>;
   rockerRefs: ReadonlyArray<RefObject<THREE.Group | null>>;
-  fingerRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
+  fingerVisualRefs: ReadonlyArray<RefObject<THREE.Group | null>>;
+  fingerColliderRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
   closure: MutableRefObject<number>;
 }
 
@@ -275,11 +281,12 @@ function ClawLinkageDriver({
   housingRef,
   plungerRef,
   rockerRefs,
-  fingerRefs,
+  fingerVisualRefs,
+  fingerColliderRefs,
   closure,
 }: ClawLinkageDriverProps) {
   // Shared closed-loop joints over-constrain Rapier, so the body-mounted rocker
-  // rotates locally while the plunger and contact colliders follow that pose.
+  // and visible mechanism stay local while only contact colliders follow it.
   const openPose = useMemo(() => getClawPose(0), []);
   useFrame(() => {
     const housing = housingRef.current;
@@ -303,16 +310,12 @@ function ClawLinkageDriver({
     const toWorldPosition = (localPosition: THREE.Vector3) =>
       localPosition.applyQuaternion(housingQuaternion).add(housingPosition);
 
-    const plungerPosition = toWorldPosition(
-      new THREE.Vector3(0, pose.plungerY, 0),
-    );
-    plunger.setNextKinematicTranslation(plungerPosition);
-    plunger.setNextKinematicRotation(housingQuaternion);
+    plunger.position.set(0, pose.plungerY, 0);
 
     for (let index = 0; index < FINGER_COUNT; index += 1) {
       const rocker = rockerRefs[index].current;
-      const finger = fingerRefs[index].current;
-      if (!rocker || !finger) continue;
+      const fingerVisual = fingerVisualRefs[index].current;
+      const fingerCollider = fingerColliderRefs[index].current;
 
       const hingeAxis = new THREE.Vector3(...radialAxis(index));
       const rockerLocalRotation = new THREE.Quaternion().setFromAxisAngle(
@@ -323,15 +326,25 @@ function ClawLinkageDriver({
         hingeAxis,
         pose.angle,
       );
-      const fingerPosition = toWorldPosition(
-        radialPoint(index, pose.hinge.r, pose.hinge.y),
+      const fingerLocalPosition = radialPoint(
+        index,
+        pose.hinge.r,
+        pose.hinge.y,
       );
 
-      rocker.quaternion.copy(rockerLocalRotation);
-      finger.setNextKinematicTranslation(fingerPosition);
-      finger.setNextKinematicRotation(
-        housingQuaternion.clone().multiply(fingerLocalRotation),
-      );
+      rocker?.quaternion.copy(rockerLocalRotation);
+      if (fingerVisual) {
+        fingerVisual.position.copy(fingerLocalPosition);
+        fingerVisual.quaternion.copy(fingerLocalRotation);
+      }
+      if (fingerCollider) {
+        fingerCollider.setNextKinematicTranslation(
+          toWorldPosition(fingerLocalPosition.clone()),
+        );
+        fingerCollider.setNextKinematicRotation(
+          housingQuaternion.clone().multiply(fingerLocalRotation),
+        );
+      }
     }
   });
 
@@ -407,11 +420,11 @@ function RockerLink({
   );
 }
 
-function ClawFinger({ index, fingerRef }: ClawFingerProps) {
+function ClawFingerVisual({
+  index,
+  fingerRef,
+}: ClawFingerVisualProps) {
   const geometry = CLAW_GEOMETRY;
-  const clawFriction = useGameStore(
-    (state) => state.settings.clawFriction,
-  );
   const shape = useMemo(() => {
     const theta = index * ((Math.PI * 2) / FINGER_COUNT) + Math.PI / 6;
     const radial = new THREE.Vector3(Math.cos(theta), 0, Math.sin(theta));
@@ -447,9 +460,6 @@ function ClawFinger({ index, fingerRef }: ClawFingerProps) {
           number,
           number,
         ],
-      segments: points.slice(0, -1).map((point, segmentIndex) =>
-        between(point, points[segmentIndex + 1]),
-      ),
       tip: points.at(-1)!.toArray() as [number, number, number],
     };
   }, [geometry, index]);
@@ -457,46 +467,12 @@ function ClawFinger({ index, fingerRef }: ClawFingerProps) {
   const hinge = radialPoint(index, openPose.hinge.r, openPose.hinge.y);
 
   return (
-    <RigidBody
+    <group
       ref={fingerRef}
-      type="kinematicPosition"
-      colliders={false}
-      position={[
-        BODY_INITIAL_POSITION[0] + hinge.x,
-        BODY_INITIAL_POSITION[1] + hinge.y,
-        BODY_INITIAL_POSITION[2] + hinge.z,
-      ]}
+      position={hinge.toArray()}
       quaternion={shape.openFingerQuaternion}
-      ccd
-      name={`claw-finger-${index + 1}`}
+      name={`claw-finger-visual-${index + 1}`}
     >
-      {shape.segments.map((segment, segmentIndex) => (
-        <CapsuleCollider
-          key={segmentIndex}
-          args={[
-            Math.max(
-              0.02,
-              segment.length / 2 - geometry.tineRadius,
-            ),
-            geometry.tineRadius,
-          ]}
-          position={segment.position}
-          quaternion={segment.quaternion}
-          friction={clawFriction}
-          restitution={0.01}
-          mass={0.07}
-          collisionGroups={FINGER_COLLISION_GROUPS}
-        />
-      ))}
-      <BallCollider
-        args={[geometry.scoopRadius]}
-        position={shape.tip}
-        friction={clawFriction}
-        restitution={0}
-        mass={0.04}
-        collisionGroups={FINGER_COLLISION_GROUPS}
-      />
-
       <mesh castShadow geometry={shape.geometry}>
         <meshStandardMaterial
           color="#d6d8d5"
@@ -569,7 +545,143 @@ function ClawFinger({ index, fingerRef }: ClawFingerProps) {
           roughness={0.24}
         />
       </mesh>
+    </group>
+  );
+}
+
+function ClawFingerCollider({
+  index,
+  fingerRef,
+}: ClawFingerColliderProps) {
+  const geometry = CLAW_GEOMETRY;
+  const clawFriction = useGameStore(
+    (state) => state.settings.clawFriction,
+  );
+  const shape = useMemo(() => {
+    const theta = thetaForIndex(index);
+    const radial = new THREE.Vector3(Math.cos(theta), 0, Math.sin(theta));
+    const points = geometry.curvePoints.map(
+      (point) =>
+        new THREE.Vector3(
+          radial.x * point.r,
+          point.y,
+          radial.z * point.r,
+        ),
+    );
+
+    return {
+      segments: points.slice(0, -1).map((point, segmentIndex) =>
+        between(point, points[segmentIndex + 1]),
+      ),
+      tip: points.at(-1)!.toArray() as [number, number, number],
+    };
+  }, [geometry, index]);
+  const openPose = getClawPose(0);
+  const hinge = radialPoint(index, openPose.hinge.r, openPose.hinge.y);
+  const openFingerQuaternion = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(...radialAxis(index)),
+    openPose.angle,
+  );
+
+  return (
+    <RigidBody
+      ref={fingerRef}
+      type="kinematicPosition"
+      colliders={false}
+      position={[
+        BODY_INITIAL_POSITION[0] + hinge.x,
+        BODY_INITIAL_POSITION[1] + hinge.y,
+        BODY_INITIAL_POSITION[2] + hinge.z,
+      ]}
+      quaternion={openFingerQuaternion}
+      ccd
+      name={`claw-finger-collider-${index + 1}`}
+    >
+      {shape.segments.map((segment, segmentIndex) => (
+        <CapsuleCollider
+          key={segmentIndex}
+          args={[
+            Math.max(
+              0.02,
+              segment.length / 2 - geometry.tineRadius,
+            ),
+            geometry.tineRadius,
+          ]}
+          position={segment.position}
+          quaternion={segment.quaternion}
+          friction={clawFriction}
+          restitution={0.01}
+          mass={0.07}
+          collisionGroups={FINGER_COLLISION_GROUPS}
+        />
+      ))}
+      <BallCollider
+        args={[geometry.scoopRadius]}
+        position={shape.tip}
+        friction={clawFriction}
+        restitution={0}
+        mass={0.04}
+        collisionGroups={FINGER_COLLISION_GROUPS}
+      />
     </RigidBody>
+  );
+}
+
+function PlungerVisual({
+  plungerRef,
+}: {
+  plungerRef: RefObject<THREE.Group | null>;
+}) {
+  return (
+    <group
+      ref={plungerRef}
+      position={[0, CLAW_GEOMETRY.openPlungerY, 0]}
+      name="claw-central-plunger"
+    >
+      <mesh castShadow position={[0, 0.27, 0]}>
+        <cylinderGeometry args={[0.052, 0.052, 0.56, 18]} />
+        <meshStandardMaterial
+          color="#929794"
+          metalness={0.96}
+          roughness={0.16}
+        />
+      </mesh>
+      <mesh castShadow>
+        <cylinderGeometry args={[0.13, 0.13, 0.065, 24]} />
+        <meshStandardMaterial
+          color="#b7bbb8"
+          metalness={0.95}
+          roughness={0.18}
+        />
+      </mesh>
+      {Array.from({ length: FINGER_COUNT }, (_, index) => {
+        const theta = thetaForIndex(index);
+        return (
+          <group key={index} rotation={[0, -theta, 0]}>
+            <mesh castShadow position={[0.065, 0, 0]}>
+              <boxGeometry args={[0.13, 0.045, 0.055]} />
+              <meshStandardMaterial
+                color="#aeb3b0"
+                metalness={0.94}
+                roughness={0.2}
+              />
+            </mesh>
+            <mesh
+              castShadow
+              position={[CLAW_GEOMETRY.plungerRadius, 0, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+            >
+              <cylinderGeometry args={[0.024, 0.024, 0.085, 12]} />
+              <meshStandardMaterial
+                color="#686d69"
+                metalness={0.9}
+                roughness={0.24}
+              />
+            </mesh>
+          </group>
+        );
+      })}
+    </group>
   );
 }
 
@@ -699,10 +811,15 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const { world, rapier } = useRapier();
   const anchorRef = useRef<RapierRigidBody>(null);
   const housingRef = useRef<RapierRigidBody>(null);
-  const fingerRefs = [
+  const fingerColliderRefs = [
     useRef<RapierRigidBody>(null),
     useRef<RapierRigidBody>(null),
     useRef<RapierRigidBody>(null),
+  ];
+  const fingerVisualRefs = [
+    useRef<THREE.Group>(null),
+    useRef<THREE.Group>(null),
+    useRef<THREE.Group>(null),
   ];
   const rockerRefs = [
     useRef<THREE.Group>(null),
@@ -713,7 +830,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const gantryRef = useRef<THREE.Group>(null);
   const trolleyRef = useRef<THREE.Group>(null);
   const drumRef = useRef<THREE.Mesh>(null);
-  const plungerRef = useRef<RapierRigidBody>(null);
+  const plungerRef = useRef<THREE.Group>(null);
   const umbilicalRef = useRef<THREE.InstancedMesh>(null);
   const debugTensionRef = useRef<THREE.Mesh>(null);
   const closure = useRef(0);
@@ -1030,7 +1147,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         minFps: Math.round(Math.min(minFps.current, fps)),
         physicsMs: Number((performance.now() - started).toFixed(2)),
         activeBodies:
-          Object.values(bodies.current).filter(Boolean).length + 6,
+          Object.values(bodies.current).filter(Boolean).length + 5,
         cableError: Number((cableState.overrun * 1000).toFixed(1)),
         cableLength: Number(cableLength.current.toFixed(2)),
         cableDistance: Number(cableState.distance.toFixed(2)),
@@ -1228,77 +1345,30 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
             rockerRef={rockerRefs[index]}
           />
         ))}
-      </RigidBody>
-
-      <RigidBody
-        ref={plungerRef}
-        type="kinematicPosition"
-        colliders={false}
-        position={[
-          BODY_INITIAL_POSITION[0],
-          BODY_INITIAL_POSITION[1] + CLAW_GEOMETRY.openPlungerY,
-          BODY_INITIAL_POSITION[2],
-        ]}
-        name="claw-central-plunger"
-      >
-        <mesh castShadow position={[0, 0.27, 0]}>
-          <cylinderGeometry args={[0.052, 0.052, 0.56, 18]} />
-          <meshStandardMaterial
-            color="#929794"
-            metalness={0.96}
-            roughness={0.16}
+        <PlungerVisual plungerRef={plungerRef} />
+        {Array.from({ length: FINGER_COUNT }, (_, index) => (
+          <ClawFingerVisual
+            key={index}
+            index={index}
+            fingerRef={fingerVisualRefs[index]}
           />
-        </mesh>
-        <mesh castShadow>
-          <cylinderGeometry args={[0.13, 0.13, 0.065, 24]} />
-          <meshStandardMaterial
-            color="#b7bbb8"
-            metalness={0.95}
-            roughness={0.18}
-          />
-        </mesh>
-        {Array.from({ length: FINGER_COUNT }, (_, index) => {
-          const theta = thetaForIndex(index);
-          return (
-            <group key={index} rotation={[0, -theta, 0]}>
-              <mesh castShadow position={[0.065, 0, 0]}>
-                <boxGeometry args={[0.13, 0.045, 0.055]} />
-                <meshStandardMaterial
-                  color="#aeb3b0"
-                  metalness={0.94}
-                  roughness={0.2}
-                />
-              </mesh>
-              <mesh
-                castShadow
-                position={[CLAW_GEOMETRY.plungerRadius, 0, 0]}
-                rotation={[Math.PI / 2, 0, 0]}
-              >
-                <cylinderGeometry args={[0.024, 0.024, 0.085, 12]} />
-                <meshStandardMaterial
-                  color="#686d69"
-                  metalness={0.9}
-                  roughness={0.24}
-                />
-              </mesh>
-            </group>
-          );
-        })}
+        ))}
       </RigidBody>
 
       <ClawLinkageDriver
         housingRef={housingRef}
         plungerRef={plungerRef}
         rockerRefs={rockerRefs}
-        fingerRefs={fingerRefs}
+        fingerVisualRefs={fingerVisualRefs}
+        fingerColliderRefs={fingerColliderRefs}
         closure={closure}
       />
 
       {Array.from({ length: FINGER_COUNT }, (_, index) => (
-        <ClawFinger
+        <ClawFingerCollider
           key={index}
           index={index}
-          fingerRef={fingerRefs[index]}
+          fingerRef={fingerColliderRefs[index]}
         />
       ))}
     </>

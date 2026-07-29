@@ -124,15 +124,24 @@ test("the complete linkage follows the suspended housing pose", async () => {
   );
 
   assert.match(source, /function ClawLinkageDriver/);
-  assert.equal(source.match(/type="kinematicPosition"/g)?.length, 3);
+  assert.equal(source.match(/type="kinematicPosition"/g)?.length, 2);
   assert.match(source, /setNextKinematicTranslation/);
   assert.match(source, /setNextKinematicRotation/);
   assert.match(source, /function RockerLink/);
+  assert.match(source, /function PlungerVisual/);
+  assert.match(source, /function ClawFingerVisual/);
+  assert.match(source, /function ClawFingerCollider/);
   assert.match(
     source,
     /<group ref=\{rockerRef\} position=\{shape\.housingPivot\}>/,
   );
-  assert.match(source, /rocker\.quaternion\.copy\(rockerLocalRotation\)/);
+  assert.match(source, /rocker\?\.quaternion\.copy\(rockerLocalRotation\)/);
+  assert.match(source, /plunger\.position\.set\(0, pose\.plungerY, 0\)/);
+  assert.match(source, /fingerVisual\.position\.copy\(fingerLocalPosition\)/);
+  assert.match(
+    source,
+    /<PlungerVisual plungerRef=\{plungerRef\} \/>[\s\S]*<ClawFingerVisual/,
+  );
   assert.match(
     source,
     /applyQuaternion\(housingQuaternion\)\.add\(housingPosition\)/,
