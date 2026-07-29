@@ -59,14 +59,13 @@ interface MechanicalClawProps {
 
 interface ClawFingerProps {
   index: number;
-  rockerRef: RefObject<RapierRigidBody | null>;
   fingerRef: RefObject<RapierRigidBody | null>;
 }
 
 interface ClawLinkageDriverProps {
   housingRef: RefObject<RapierRigidBody | null>;
   plungerRef: RefObject<RapierRigidBody | null>;
-  rockerRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
+  rockerRefs: ReadonlyArray<RefObject<THREE.Group | null>>;
   fingerRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
   closure: MutableRefObject<number>;
 }
@@ -279,8 +278,8 @@ function ClawLinkageDriver({
   fingerRefs,
   closure,
 }: ClawLinkageDriverProps) {
-  // Shared closed-loop joints over-constrain Rapier, so the visible linkage and
-  // contact colliders follow the exact mechanism pose in housing-local space.
+  // Shared closed-loop joints over-constrain Rapier, so the body-mounted rocker
+  // rotates locally while the plunger and contact colliders follow that pose.
   const openPose = useMemo(() => getClawPose(0), []);
   useFrame(() => {
     const housing = housingRef.current;
@@ -324,21 +323,11 @@ function ClawLinkageDriver({
         hingeAxis,
         pose.angle,
       );
-      const rockerPosition = toWorldPosition(
-        radialPoint(
-          index,
-          CLAW_GEOMETRY.housingPivot.r,
-          CLAW_GEOMETRY.housingPivot.y,
-        ),
-      );
       const fingerPosition = toWorldPosition(
         radialPoint(index, pose.hinge.r, pose.hinge.y),
       );
 
-      rocker.setNextKinematicTranslation(rockerPosition);
-      rocker.setNextKinematicRotation(
-        housingQuaternion.clone().multiply(rockerLocalRotation),
-      );
+      rocker.quaternion.copy(rockerLocalRotation);
       finger.setNextKinematicTranslation(fingerPosition);
       finger.setNextKinematicRotation(
         housingQuaternion.clone().multiply(fingerLocalRotation),
@@ -349,11 +338,76 @@ function ClawLinkageDriver({
   return null;
 }
 
-function ClawFinger({
+function RockerLink({
   index,
   rockerRef,
-  fingerRef,
-}: ClawFingerProps) {
+}: {
+  index: number;
+  rockerRef: RefObject<THREE.Group | null>;
+}) {
+  const shape = useMemo(() => {
+    const openPose = getClawPose(0);
+    const housingPivot = radialPoint(
+      index,
+      CLAW_GEOMETRY.housingPivot.r,
+      CLAW_GEOMETRY.housingPivot.y,
+    );
+    const openHinge = radialPoint(
+      index,
+      openPose.hinge.r,
+      openPose.hinge.y,
+    );
+    const rockerEnd = openHinge.clone().sub(housingPivot);
+    const hingeAxis = new THREE.Vector3(...radialAxis(index));
+    const pinQuaternion = new THREE.Quaternion().setFromUnitVectors(
+      Y_AXIS,
+      hingeAxis,
+    );
+
+    return {
+      housingPivot: housingPivot.toArray() as [number, number, number],
+      rockerLink: plateBetween(
+        new THREE.Vector3(),
+        rockerEnd,
+        hingeAxis,
+      ),
+      rockerEnd: rockerEnd.toArray() as [number, number, number],
+      pinQuaternion:
+        pinQuaternion.toArray() as [number, number, number, number],
+    };
+  }, [index]);
+
+  return (
+    <group ref={rockerRef} position={shape.housingPivot}>
+      <mesh
+        castShadow
+        position={shape.rockerLink.position}
+        quaternion={shape.rockerLink.quaternion}
+      >
+        <boxGeometry args={[0.078, shape.rockerLink.length, 0.028]} />
+        <meshStandardMaterial
+          color="#aeb2af"
+          metalness={0.93}
+          roughness={0.22}
+        />
+      </mesh>
+      <mesh
+        castShadow
+        position={shape.rockerEnd}
+        quaternion={shape.pinQuaternion}
+      >
+        <cylinderGeometry args={[0.058, 0.058, 0.115, 18]} />
+        <meshStandardMaterial
+          color="#777c78"
+          metalness={0.94}
+          roughness={0.22}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+function ClawFinger({ index, fingerRef }: ClawFingerProps) {
   const geometry = CLAW_GEOMETRY;
   const clawFriction = useGameStore(
     (state) => state.settings.clawFriction,
@@ -371,17 +425,6 @@ function ClawFinger({
     );
     const strip = createFingerStripGeometry(index);
     const openPose = getClawPose(0);
-    const housingPivot = radialPoint(
-      index,
-      geometry.housingPivot.r,
-      geometry.housingPivot.y,
-    );
-    const openHinge = radialPoint(
-      index,
-      openPose.hinge.r,
-      openPose.hinge.y,
-    );
-    const rockerEnd = openHinge.clone().sub(housingPivot);
     const hingeAxis = new THREE.Vector3(...radialAxis(index));
     const pinQuaternion = new THREE.Quaternion().setFromUnitVectors(
       Y_AXIS,
@@ -395,12 +438,6 @@ function ClawFinger({
       geometry: strip.geometry,
       plungerArm: strip.plungerArm,
       plungerArmEnd: strip.plungerArmEnd,
-      rockerLink: plateBetween(
-        new THREE.Vector3(),
-        rockerEnd,
-        hingeAxis,
-      ),
-      rockerEnd: rockerEnd.toArray() as [number, number, number],
       pinQuaternion:
         pinQuaternion.toArray() as [number, number, number, number],
       openFingerQuaternion:
@@ -417,178 +454,122 @@ function ClawFinger({
     };
   }, [geometry, index]);
   const openPose = getClawPose(0);
-  const housingPivot = radialPoint(
-    index,
-    geometry.housingPivot.r,
-    geometry.housingPivot.y,
-  );
   const hinge = radialPoint(index, openPose.hinge.r, openPose.hinge.y);
 
   return (
-    <>
-      <RigidBody
-        ref={rockerRef}
-        type="kinematicPosition"
-        colliders={false}
-        position={[
-          BODY_INITIAL_POSITION[0] + housingPivot.x,
-          BODY_INITIAL_POSITION[1] + housingPivot.y,
-          BODY_INITIAL_POSITION[2] + housingPivot.z,
-        ]}
-        name={`claw-rocker-link-${index + 1}`}
-      >
+    <RigidBody
+      ref={fingerRef}
+      type="kinematicPosition"
+      colliders={false}
+      position={[
+        BODY_INITIAL_POSITION[0] + hinge.x,
+        BODY_INITIAL_POSITION[1] + hinge.y,
+        BODY_INITIAL_POSITION[2] + hinge.z,
+      ]}
+      quaternion={shape.openFingerQuaternion}
+      ccd
+      name={`claw-finger-${index + 1}`}
+    >
+      {shape.segments.map((segment, segmentIndex) => (
         <CapsuleCollider
+          key={segmentIndex}
           args={[
-            Math.max(0.02, shape.rockerLink.length / 2 - 0.035),
-            0.035,
+            Math.max(
+              0.02,
+              segment.length / 2 - geometry.tineRadius,
+            ),
+            geometry.tineRadius,
           ]}
-          position={shape.rockerLink.position}
-          quaternion={shape.rockerLink.quaternion}
-          mass={0.055}
-          collisionGroups={HOUSING_COLLISION_GROUPS}
-        />
-        <mesh
-          castShadow
-          position={shape.rockerLink.position}
-          quaternion={shape.rockerLink.quaternion}
-        >
-          <boxGeometry args={[0.078, shape.rockerLink.length, 0.028]} />
-          <meshStandardMaterial
-            color="#aeb2af"
-            metalness={0.93}
-            roughness={0.22}
-          />
-        </mesh>
-        {[
-          [0, 0, 0],
-          shape.rockerEnd,
-        ].map((position, pivotIndex) => (
-          <mesh
-            key={pivotIndex}
-            castShadow
-            position={position as [number, number, number]}
-            quaternion={shape.pinQuaternion}
-          >
-            <cylinderGeometry args={[0.058, 0.058, 0.115, 18]} />
-            <meshStandardMaterial
-              color="#777c78"
-              metalness={0.94}
-              roughness={0.22}
-            />
-          </mesh>
-        ))}
-      </RigidBody>
-
-      <RigidBody
-        ref={fingerRef}
-        type="kinematicPosition"
-        colliders={false}
-        position={[
-          BODY_INITIAL_POSITION[0] + hinge.x,
-          BODY_INITIAL_POSITION[1] + hinge.y,
-          BODY_INITIAL_POSITION[2] + hinge.z,
-        ]}
-        quaternion={shape.openFingerQuaternion}
-        ccd
-        name={`claw-finger-${index + 1}`}
-      >
-        {shape.segments.map((segment, segmentIndex) => (
-          <CapsuleCollider
-            key={segmentIndex}
-            args={[
-              Math.max(
-                0.02,
-                segment.length / 2 - geometry.tineRadius,
-              ),
-              geometry.tineRadius,
-            ]}
-            position={segment.position}
-            quaternion={segment.quaternion}
-            friction={clawFriction}
-            restitution={0.01}
-            mass={0.07}
-            collisionGroups={FINGER_COLLISION_GROUPS}
-          />
-        ))}
-        <BallCollider
-          args={[geometry.scoopRadius]}
-          position={shape.tip}
+          position={segment.position}
+          quaternion={segment.quaternion}
           friction={clawFriction}
-          restitution={0}
-          mass={0.04}
+          restitution={0.01}
+          mass={0.07}
           collisionGroups={FINGER_COLLISION_GROUPS}
         />
+      ))}
+      <BallCollider
+        args={[geometry.scoopRadius]}
+        position={shape.tip}
+        friction={clawFriction}
+        restitution={0}
+        mass={0.04}
+        collisionGroups={FINGER_COLLISION_GROUPS}
+      />
 
-        <mesh castShadow geometry={shape.geometry}>
-          <meshStandardMaterial
-            color="#d6d8d5"
-            metalness={0.96}
-            roughness={0.2}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={shape.plungerArm.position}
-          quaternion={shape.plungerArm.quaternion}
-        >
-          <boxGeometry
-            args={[
-              geometry.fingerWidth * 0.9,
-              shape.plungerArm.length,
-              geometry.fingerThickness,
-            ]}
-          />
-          <meshStandardMaterial
-            color="#d0d3d0"
-            metalness={0.96}
-            roughness={0.19}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={shape.plungerArmEnd}
-          quaternion={shape.pinQuaternion}
-        >
-          <cylinderGeometry
-            args={[
-              geometry.fingerWidth * 0.66,
-              geometry.fingerWidth * 0.66,
-              0.096,
-              18,
-            ]}
-          />
-          <meshStandardMaterial
-            color="#c8cbc8"
-            metalness={0.94}
-            roughness={0.18}
-          />
-        </mesh>
-        <mesh castShadow quaternion={shape.pinQuaternion}>
-          <cylinderGeometry
-            args={[geometry.fingerWidth * 0.72, geometry.fingerWidth * 0.72, 0.1, 18]}
-          />
-          <meshStandardMaterial
-            color="#c8cbc8"
-            metalness={0.94}
-            roughness={0.18}
-          />
-        </mesh>
-        <mesh
-          castShadow
-          position={shape.tip}
-          rotation={[0, -thetaForIndex(index), 0]}
-          scale={[1.06, 0.5, 0.72]}
-        >
-          <sphereGeometry args={[0.075, 16, 12]} />
-          <meshStandardMaterial
-            color="#c9ccc9"
-            metalness={0.92}
-            roughness={0.24}
-          />
-        </mesh>
-      </RigidBody>
-
-    </>
+      <mesh castShadow geometry={shape.geometry}>
+        <meshStandardMaterial
+          color="#d6d8d5"
+          metalness={0.96}
+          roughness={0.2}
+        />
+      </mesh>
+      <mesh
+        castShadow
+        position={shape.plungerArm.position}
+        quaternion={shape.plungerArm.quaternion}
+      >
+        <boxGeometry
+          args={[
+            geometry.fingerWidth * 0.9,
+            shape.plungerArm.length,
+            geometry.fingerThickness,
+          ]}
+        />
+        <meshStandardMaterial
+          color="#d0d3d0"
+          metalness={0.96}
+          roughness={0.19}
+        />
+      </mesh>
+      <mesh
+        castShadow
+        position={shape.plungerArmEnd}
+        quaternion={shape.pinQuaternion}
+      >
+        <cylinderGeometry
+          args={[
+            geometry.fingerWidth * 0.66,
+            geometry.fingerWidth * 0.66,
+            0.096,
+            18,
+          ]}
+        />
+        <meshStandardMaterial
+          color="#c8cbc8"
+          metalness={0.94}
+          roughness={0.18}
+        />
+      </mesh>
+      <mesh castShadow quaternion={shape.pinQuaternion}>
+        <cylinderGeometry
+          args={[
+            geometry.fingerWidth * 0.72,
+            geometry.fingerWidth * 0.72,
+            0.1,
+            18,
+          ]}
+        />
+        <meshStandardMaterial
+          color="#c8cbc8"
+          metalness={0.94}
+          roughness={0.18}
+        />
+      </mesh>
+      <mesh
+        castShadow
+        position={shape.tip}
+        rotation={[0, -thetaForIndex(index), 0]}
+        scale={[1.06, 0.5, 0.72]}
+      >
+        <sphereGeometry args={[0.075, 16, 12]} />
+        <meshStandardMaterial
+          color="#c9ccc9"
+          metalness={0.92}
+          roughness={0.24}
+        />
+      </mesh>
+    </RigidBody>
   );
 }
 
@@ -724,9 +705,9 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     useRef<RapierRigidBody>(null),
   ];
   const rockerRefs = [
-    useRef<RapierRigidBody>(null),
-    useRef<RapierRigidBody>(null),
-    useRef<RapierRigidBody>(null),
+    useRef<THREE.Group>(null),
+    useRef<THREE.Group>(null),
+    useRef<THREE.Group>(null),
   ];
   const cableRef = useRef<THREE.Mesh>(null);
   const gantryRef = useRef<THREE.Group>(null);
@@ -1049,7 +1030,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         minFps: Math.round(Math.min(minFps.current, fps)),
         physicsMs: Number((performance.now() - started).toFixed(2)),
         activeBodies:
-          Object.values(bodies.current).filter(Boolean).length + 9,
+          Object.values(bodies.current).filter(Boolean).length + 6,
         cableError: Number((cableState.overrun * 1000).toFixed(1)),
         cableLength: Number(cableLength.current.toFixed(2)),
         cableDistance: Number(cableState.distance.toFixed(2)),
@@ -1240,6 +1221,13 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
             </group>
           );
         })}
+        {Array.from({ length: FINGER_COUNT }, (_, index) => (
+          <RockerLink
+            key={index}
+            index={index}
+            rockerRef={rockerRefs[index]}
+          />
+        ))}
       </RigidBody>
 
       <RigidBody
@@ -1310,7 +1298,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         <ClawFinger
           key={index}
           index={index}
-          rockerRef={rockerRefs[index]}
           fingerRef={fingerRefs[index]}
         />
       ))}
