@@ -195,3 +195,23 @@ test("housing seams use horizontal collars instead of vertical torus rings", asy
   assert.match(source, /collar\.height/);
   assert.doesNotMatch(source, /\{\[0\.4, 0\.195, 0\.035, -0\.19\]\.map/);
 });
+
+test("the housing uses one simple cylindrical collider", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+  const housingStart = source.indexOf('name="claw-solenoid-housing"');
+  const visualStart = source.indexOf(
+    '<group name="claw-render-meshes"',
+    housingStart,
+  );
+  const housingColliders = source.slice(housingStart, visualStart);
+
+  assert.ok(housingStart >= 0);
+  assert.ok(visualStart > housingStart);
+  assert.equal(housingColliders.match(/<CylinderCollider/g)?.length, 1);
+  assert.match(housingColliders, /args=\{\[0\.31, 0\.22\]\}/);
+  assert.match(housingColliders, /position=\{\[0, 0\.09, 0\]\}/);
+  assert.match(housingColliders, /mass=\{1\.02\}/);
+});

@@ -1385,18 +1385,11 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         name="claw-solenoid-housing"
       >
         <CylinderCollider
-          args={[0.23, 0.22]}
-          position={[0, 0.17, 0]}
+          args={[0.31, 0.22]}
+          position={[0, 0.09, 0]}
           friction={clawFriction}
           restitution={0.02}
-          mass={0.78}
-          collisionGroups={HOUSING_COLLISION_GROUPS}
-        />
-        <CylinderCollider
-          args={[0.14, 0.185]}
-          position={[0, -0.08, 0]}
-          friction={clawFriction}
-          mass={0.24}
+          mass={1.02}
           collisionGroups={HOUSING_COLLISION_GROUPS}
         />
 
