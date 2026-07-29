@@ -26,6 +26,8 @@ import {
   sampleClawClearance,
 } from "@/game/clawKinematics.mjs";
 import {
+  bodyVelocityForAttachmentTarget,
+  computeSuspensionTiltTorque,
   measureInextensibleCable,
   projectInextensibleCableVelocity,
 } from "@/game/cableDynamics.mjs";
@@ -1234,6 +1236,13 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       bodyRotation.z,
       bodyRotation.w,
     );
+    const angularVelocity = housing.angvel();
+    const tiltControl = computeSuspensionTiltTorque({
+      bodyUp: Y_AXIS.clone().applyQuaternion(housingQuaternion),
+      angularVelocity,
+      swingDamping,
+    });
+    housing.addTorque(tiltControl.torque, true);
     const attachmentOffset = new THREE.Vector3(
       0,
       CLAW_ATTACHMENT_Y,
@@ -1250,6 +1259,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       trolleyPosition.current.z,
     );
     const attachmentVelocity = housing.velocityAtPoint(attachment);
+    const bodyLinearVelocity = housing.linvel();
     const cableState = measureInextensibleCable({
       anchor,
       attachment,
@@ -1272,7 +1282,14 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         attachmentVelocity,
         targetLengthRate,
       });
-      housing.setLinvel(projectedVelocity.velocity, true);
+      housing.setLinvel(
+        bodyVelocityForAttachmentTarget({
+          bodyVelocity: bodyLinearVelocity,
+          attachmentVelocity,
+          targetAttachmentVelocity: projectedVelocity.velocity,
+        }),
+        true,
+      );
     }
 
     setMeshBetween(cableRef.current, anchor, attachment);
@@ -1378,8 +1395,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         colliders={false}
         position={BODY_INITIAL_POSITION}
         linearDamping={0.18 + swingDamping * 0.28}
-        angularDamping={0.35 + swingDamping * 0.72}
-        enabledRotations={[false, true, false]}
+        angularDamping={0.06 + swingDamping * 0.12}
+        enabledRotations={[true, true, true]}
         canSleep={false}
         ccd
         name="claw-solenoid-housing"
