@@ -113,7 +113,9 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
     source,
     /connectorRefOne|connectorLength|connectorPoint/,
   );
-  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 2);
+  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 3);
+  assert.equal(source.match(/usePrismaticJoint\(/g)?.length, 1);
+  assert.match(source, /claw-central-plunger/);
   assert.doesNotMatch(source, /proximalLength|distalLength|bendAngle|shape\.knee/);
   assert.match(source, /JointData\.rope\(\s*cableLength\.current/);
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);

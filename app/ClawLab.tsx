@@ -116,7 +116,7 @@ export default function ClawLab() {
               <GameCanvas />
 
               <div className="viewport-badge">
-                <span>7-BODY LINKAGE</span>
+                <span>8-BODY LINKAGE</span>
                 RAPIER · 60 HZ
               </div>
               <div className="camera-hint" aria-hidden="true">
