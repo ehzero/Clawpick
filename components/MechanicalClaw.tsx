@@ -53,7 +53,6 @@ const BODY_INITIAL_POSITION: [number, number, number] = [
 const HOUSING_COLLISION_GROUPS = interactionGroups([1], [0]);
 const FINGER_COLLISION_GROUPS = interactionGroups([2], [0, 2]);
 const UMBILICAL_SEGMENTS = 48;
-const SERVICE_CABLE_SEGMENTS = 28;
 
 interface MechanicalClawProps {
   bodies: MutableRefObject<Record<string, RapierRigidBody | null>>;
@@ -98,6 +97,33 @@ function between(start: THREE.Vector3, end: THREE.Vector3): SegmentTransform {
     Y_AXIS,
     direction.clone().normalize(),
   );
+  const midpoint = start.clone().add(end).multiplyScalar(0.5);
+  return {
+    position: midpoint.toArray() as [number, number, number],
+    quaternion: quaternion.toArray() as [number, number, number, number],
+    length,
+  };
+}
+
+function plateBetween(
+  start: THREE.Vector3,
+  end: THREE.Vector3,
+  widthAxis: THREE.Vector3,
+): SegmentTransform {
+  const direction = end.clone().sub(start);
+  const length = direction.length();
+  const lengthAxis = direction.clone().normalize();
+  const normalizedWidthAxis = widthAxis.clone().normalize();
+  const faceNormal = normalizedWidthAxis
+    .clone()
+    .cross(lengthAxis)
+    .normalize();
+  const rotation = new THREE.Matrix4().makeBasis(
+    normalizedWidthAxis,
+    lengthAxis,
+    faceNormal,
+  );
+  const quaternion = new THREE.Quaternion().setFromRotationMatrix(rotation);
   const midpoint = start.clone().add(end).multiplyScalar(0.5);
   return {
     position: midpoint.toArray() as [number, number, number],
@@ -183,7 +209,23 @@ function createFingerStripGeometry(index: number) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  return { curve, geometry };
+  const driveDirection = new THREE.Vector3(
+    radial.x * CLAW_GEOMETRY.driveSlotDirection.r,
+    CLAW_GEOMETRY.driveSlotDirection.y,
+    radial.z * CLAW_GEOMETRY.driveSlotDirection.r,
+  ).normalize();
+  const driveTail = plateBetween(
+    new THREE.Vector3(),
+    driveDirection.clone().multiplyScalar(CLAW_GEOMETRY.driveTailLength),
+    hingeAxis,
+  );
+  const driveSlot = plateBetween(
+    driveDirection.clone().multiplyScalar(CLAW_GEOMETRY.driveSlotStart),
+    driveDirection.clone().multiplyScalar(CLAW_GEOMETRY.driveSlotEnd),
+    hingeAxis,
+  );
+
+  return { curve, geometry, driveTail, driveSlot };
 }
 
 function setMeshBetween(
@@ -283,6 +325,8 @@ function ClawFinger({
     const strip = createFingerStripGeometry(index);
     return {
       geometry: strip.geometry,
+      driveTail: strip.driveTail,
+      driveSlot: strip.driveSlot,
       segments: points.slice(0, -1).map((point, segmentIndex) =>
         between(point, points[segmentIndex + 1]),
       ),
@@ -339,6 +383,41 @@ function ClawFinger({
             color="#d6d8d5"
             metalness={0.96}
             roughness={0.2}
+          />
+        </mesh>
+        <mesh
+          castShadow
+          position={shape.driveTail.position}
+          quaternion={shape.driveTail.quaternion}
+        >
+          <boxGeometry
+            args={[
+              geometry.fingerWidth * 0.9,
+              shape.driveTail.length,
+              geometry.fingerThickness,
+            ]}
+          />
+          <meshStandardMaterial
+            color="#d0d3d0"
+            metalness={0.96}
+            roughness={0.19}
+          />
+        </mesh>
+        <mesh
+          position={shape.driveSlot.position}
+          quaternion={shape.driveSlot.quaternion}
+        >
+          <boxGeometry
+            args={[
+              geometry.fingerWidth * 0.3,
+              shape.driveSlot.length,
+              geometry.fingerThickness * 1.08,
+            ]}
+          />
+          <meshStandardMaterial
+            color="#4d524f"
+            metalness={0.82}
+            roughness={0.3}
           />
         </mesh>
         <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
@@ -512,11 +591,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const trolleyRef = useRef<THREE.Group>(null);
   const drumRef = useRef<THREE.Mesh>(null);
   const plungerRef = useRef<THREE.Group>(null);
-  const connectorRefOne = useRef<THREE.Mesh>(null);
-  const connectorRefTwo = useRef<THREE.Mesh>(null);
-  const connectorRefThree = useRef<THREE.Mesh>(null);
   const umbilicalRef = useRef<THREE.InstancedMesh>(null);
-  const serviceCableRef = useRef<THREE.InstancedMesh>(null);
   const debugTensionRef = useRef<THREE.Mesh>(null);
   const closure = useRef(0);
   const cableLength = useRef(MIN_CABLE_LENGTH);
@@ -821,93 +896,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       umbilicalRef.current.instanceMatrix.needsUpdate = true;
     }
 
-    const serviceTop = anchor
-      .clone()
-      .add(new THREE.Vector3(0.25, 0.01, 0.04));
-    const serviceBottomOffset = new THREE.Vector3(
-      0.23,
-      0.2,
-      0.04,
-    ).applyQuaternion(housingQuaternion);
-    const serviceBottom = new THREE.Vector3(
-      bodyPosition.x,
-      bodyPosition.y,
-      bodyPosition.z,
-    ).add(serviceBottomOffset);
-    const servicePoints: THREE.Vector3[] = [];
-    for (let index = 0; index <= SERVICE_CABLE_SEGMENTS; index += 1) {
-      const t = index / SERVICE_CABLE_SEGMENTS;
-      const sag = Math.sin(Math.PI * t);
-      servicePoints.push(
-        serviceTop
-          .clone()
-          .lerp(serviceBottom, t)
-          .add(new THREE.Vector3(0.17 * sag, -0.09 * sag, 0.04 * sag)),
-      );
-    }
-    for (let index = 0; index < SERVICE_CABLE_SEGMENTS; index += 1) {
-      setInstanceBetween(
-        serviceCableRef.current,
-        index,
-        servicePoints[index],
-        servicePoints[index + 1],
-      );
-    }
-    if (serviceCableRef.current) {
-      serviceCableRef.current.instanceMatrix.needsUpdate = true;
-    }
-
     const pose = getClawPose(closure.current);
     if (plungerRef.current) plungerRef.current.position.y = pose.plungerY;
-
-    for (let index = 0; index < FINGER_COUNT; index += 1) {
-      const finger = fingerRefs[index].current;
-      const connector =
-        index === 0
-          ? connectorRefOne.current
-          : index === 1
-            ? connectorRefTwo.current
-            : connectorRefThree.current;
-      if (!finger || !connector) continue;
-      const theta = thetaForIndex(index);
-      const linkStartLocal = new THREE.Vector3(
-        Math.cos(theta) * pose.linkStart.r,
-        pose.linkStart.y,
-        Math.sin(theta) * pose.linkStart.r,
-      );
-      const linkStartWorld = linkStartLocal
-        .applyQuaternion(housingQuaternion)
-        .add(
-          new THREE.Vector3(
-            bodyPosition.x,
-            bodyPosition.y,
-            bodyPosition.z,
-          ),
-        );
-      const fingerPosition = finger.translation();
-      const fingerRotation = finger.rotation();
-      const linkEndLocal = new THREE.Vector3(
-        Math.cos(theta) * CLAW_GEOMETRY.connectorPoint.r,
-        CLAW_GEOMETRY.connectorPoint.y,
-        Math.sin(theta) * CLAW_GEOMETRY.connectorPoint.r,
-      )
-        .applyQuaternion(
-          new THREE.Quaternion(
-            fingerRotation.x,
-            fingerRotation.y,
-            fingerRotation.z,
-            fingerRotation.w,
-          ),
-        )
-        .add(
-          new THREE.Vector3(
-            fingerPosition.x,
-            fingerPosition.y,
-            fingerPosition.z,
-          ),
-        );
-      setMeshBetween(connector, linkStartWorld, linkEndLocal);
-    }
 
     if (debugTensionRef.current) {
       setMeshBetween(debugTensionRef.current, anchor, attachment);
@@ -958,20 +948,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       >
         <cylinderGeometry args={[0.021, 0.021, 1, 7]} />
         <meshStandardMaterial color="#171918" roughness={0.7} />
-      </instancedMesh>
-      <instancedMesh
-        ref={serviceCableRef}
-        args={[undefined, undefined, SERVICE_CABLE_SEGMENTS]}
-      >
-        <cylinderGeometry args={[0.008, 0.008, 1, 6]} />
-        <meshPhysicalMaterial
-          color="#c7d8d8"
-          transparent
-          opacity={0.48}
-          roughness={0.12}
-          transmission={0.15}
-          depthWrite={false}
-        />
       </instancedMesh>
       {debug && (
         <mesh ref={debugTensionRef}>
@@ -1099,7 +1075,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
                 </mesh>
                 <mesh
                   castShadow
-                  position={[CLAW_GEOMETRY.connectorRadius, 0, 0]}
+                  position={[CLAW_GEOMETRY.drivePinRadius, 0, 0]}
                   rotation={[Math.PI / 2, 0, 0]}
                 >
                   <cylinderGeometry args={[0.024, 0.024, 0.075, 12]} />
@@ -1228,19 +1204,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
           closure={closure}
         />
       ))}
-
-      <mesh ref={connectorRefOne} castShadow>
-        <boxGeometry args={[0.052, 1, 0.022]} />
-        <meshStandardMaterial color="#aeb3b0" metalness={0.94} roughness={0.2} />
-      </mesh>
-      <mesh ref={connectorRefTwo} castShadow>
-        <boxGeometry args={[0.052, 1, 0.022]} />
-        <meshStandardMaterial color="#aeb3b0" metalness={0.94} roughness={0.2} />
-      </mesh>
-      <mesh ref={connectorRefThree} castShadow>
-        <boxGeometry args={[0.052, 1, 0.022]} />
-        <meshStandardMaterial color="#aeb3b0" metalness={0.94} roughness={0.2} />
-      </mesh>
     </>
   );
 }

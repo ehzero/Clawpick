@@ -22,8 +22,23 @@ test("each curved finger has one hinge and stays inside its hard limits", () => 
     assert.ok(pose.angle >= CLAW_GEOMETRY.minimumAngle);
     assert.ok(pose.angle <= CLAW_GEOMETRY.maximumAngle);
     assert.ok(
-      Math.abs(pose.linkLength - CLAW_GEOMETRY.connectorLength) < 1e-9,
+      Math.abs(
+        pose.drivePin.r -
+          pose.hinge.r -
+          pose.driveDirection.r * pose.driveTravel,
+      ) < 1e-9,
+      "the yoke pin must remain on the rotating finger slot",
     );
+    assert.ok(
+      Math.abs(
+        pose.drivePin.y -
+          pose.hinge.y -
+          pose.driveDirection.y * pose.driveTravel,
+      ) < 1e-9,
+      "the plunger height must be derived from the slot intersection",
+    );
+    assert.ok(pose.driveTravel >= CLAW_GEOMETRY.driveSlotStart);
+    assert.ok(pose.driveTravel <= CLAW_GEOMETRY.driveSlotEnd);
   }
 });
 
@@ -68,7 +83,13 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   assert.match(source, /createFingerStripGeometry/);
   assert.doesNotMatch(source, /<tubeGeometry/);
   assert.match(source, /umbilicalRef/);
-  assert.match(source, /serviceCableRef/);
+  assert.match(source, /driveTail/);
+  assert.match(source, /driveSlot/);
+  assert.doesNotMatch(source, /serviceCableRef|SERVICE_CABLE_SEGMENTS/);
+  assert.doesNotMatch(
+    source,
+    /connectorRefOne|connectorLength|connectorPoint/,
+  );
   assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 1);
   assert.doesNotMatch(source, /proximalLength|distalLength|bendAngle|shape\.knee/);
   assert.match(source, /JointData\.rope\(\s*cableLength\.current/);

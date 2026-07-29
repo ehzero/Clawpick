@@ -20,9 +20,14 @@ export const CLAW_GEOMETRY = Object.freeze({
   closedAngle: 12 * DEG,
   minimumAngle: 10 * DEG,
   maximumAngle: 54 * DEG,
-  connectorRadius: 0.12,
-  connectorLength: 0.3,
-  connectorPoint: Object.freeze({ r: -0.1, y: -0.2 }),
+  drivePinRadius: 0.12,
+  driveSlotDirection: Object.freeze({
+    r: Math.cos(158 * DEG),
+    y: Math.sin(158 * DEG),
+  }),
+  driveTailLength: 0.245,
+  driveSlotStart: 0.165,
+  driveSlotEnd: 0.235,
   bracketTop: Object.freeze({ r: 0.23, y: 0.12 }),
 });
 
@@ -36,7 +41,7 @@ export function smoothClosure(value) {
 }
 
 /**
- * Solves the shared plunger/linkage pose in a two-dimensional radial plane.
+ * Solves the shared plunger and direct pin-in-slot pose in a radial plane.
  * `r` points out from the claw centre and `y` points upward.
  */
 export function getClawPose(closure) {
@@ -59,31 +64,29 @@ export function getClawPose(closure) {
   const tip = rotatePoint(
     geometry.curvePoints[geometry.curvePoints.length - 1],
   );
-  const linkEnd = rotatePoint(geometry.connectorPoint);
-  const horizontal = linkEnd.r - geometry.connectorRadius;
-  const vertical = Math.sqrt(
-    Math.max(
-      0,
-      geometry.connectorLength * geometry.connectorLength -
-        horizontal * horizontal,
-    ),
-  );
-  const plungerY = linkEnd.y + vertical;
-  const linkStart = { r: geometry.connectorRadius, y: plungerY };
+  const driveDirection = {
+    r:
+      Math.cos(angle) * geometry.driveSlotDirection.r -
+      Math.sin(angle) * geometry.driveSlotDirection.y,
+    y:
+      Math.sin(angle) * geometry.driveSlotDirection.r +
+      Math.cos(angle) * geometry.driveSlotDirection.y,
+  };
+  const driveTravel =
+    (geometry.drivePinRadius - hinge.r) / driveDirection.r;
+  const plungerY = hinge.y + driveDirection.y * driveTravel;
+  const drivePin = { r: geometry.drivePinRadius, y: plungerY };
 
   return {
     closure: t,
     angle,
     hinge,
     tip,
-    linkStart,
-    linkEnd,
+    driveDirection,
+    driveTravel,
+    drivePin,
     plungerY,
     tipSeparation: Math.sqrt(3) * Math.abs(tip.r),
-    linkLength: Math.hypot(
-      linkEnd.r - linkStart.r,
-      linkEnd.y - linkStart.y,
-    ),
   };
 }
 
