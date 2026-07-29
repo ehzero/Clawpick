@@ -58,9 +58,10 @@ interface MechanicalClawProps {
   bodies: MutableRefObject<Record<string, RapierRigidBody | null>>;
 }
 
-interface FingerJointProps {
+interface FingerLinkageProps {
   index: number;
   housingRef: RefObject<RapierRigidBody | null>;
+  rockerRef: RefObject<RapierRigidBody | null>;
   fingerRef: RefObject<RapierRigidBody | null>;
   closure: MutableRefObject<number>;
 }
@@ -209,23 +210,26 @@ function createFingerStripGeometry(index: number) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const driveDirection = new THREE.Vector3(
-    radial.x * CLAW_GEOMETRY.driveSlotDirection.r,
-    CLAW_GEOMETRY.driveSlotDirection.y,
-    radial.z * CLAW_GEOMETRY.driveSlotDirection.r,
+  const plungerDirection = new THREE.Vector3(
+    radial.x * CLAW_GEOMETRY.fingerPlungerDirection.r,
+    CLAW_GEOMETRY.fingerPlungerDirection.y,
+    radial.z * CLAW_GEOMETRY.fingerPlungerDirection.r,
   ).normalize();
-  const driveTail = plateBetween(
+  const plungerArmEnd = plungerDirection
+    .clone()
+    .multiplyScalar(CLAW_GEOMETRY.fingerPlungerLength);
+  const plungerArm = plateBetween(
     new THREE.Vector3(),
-    driveDirection.clone().multiplyScalar(CLAW_GEOMETRY.driveTailLength),
-    hingeAxis,
-  );
-  const driveSlot = plateBetween(
-    driveDirection.clone().multiplyScalar(CLAW_GEOMETRY.driveSlotStart),
-    driveDirection.clone().multiplyScalar(CLAW_GEOMETRY.driveSlotEnd),
+    plungerArmEnd,
     hingeAxis,
   );
 
-  return { curve, geometry, driveTail, driveSlot };
+  return {
+    curve,
+    geometry,
+    plungerArm,
+    plungerArmEnd: plungerArmEnd.toArray() as [number, number, number],
+  };
 }
 
 function setMeshBetween(
@@ -263,36 +267,69 @@ function setInstanceBetween(
   mesh.setMatrixAt(index, matrix);
 }
 
-function FingerJoint({
+function FingerLinkageJoints({
   index,
   housingRef,
+  rockerRef,
   fingerRef,
   closure,
-}: FingerJointProps) {
+}: FingerLinkageProps) {
   const { rapier } = useRapier();
-  const hinge = radialPoint(
+  const openPose = getClawPose(0);
+  const housingPivot = radialPoint(
     index,
-    CLAW_GEOMETRY.hingeRadius,
-    CLAW_GEOMETRY.hingeY,
+    CLAW_GEOMETRY.housingPivot.r,
+    CLAW_GEOMETRY.housingPivot.y,
   );
+  const openHinge = radialPoint(
+    index,
+    openPose.hinge.r,
+    openPose.hinge.y,
+  );
+  const rockerEnd = openHinge.clone().sub(housingPivot);
   const axis = radialAxis(index);
-  const joint = useRevoluteJoint(
+  const housingRockerJoint = useRevoluteJoint(
     housingRef as RefObject<RapierRigidBody>,
-    fingerRef as RefObject<RapierRigidBody>,
+    rockerRef as RefObject<RapierRigidBody>,
     [
-      hinge.toArray(),
+      housingPivot.toArray(),
       [0, 0, 0],
       axis,
-      [CLAW_GEOMETRY.minimumAngle, CLAW_GEOMETRY.maximumAngle],
+      [-0.16, 0.16],
+    ],
+  );
+  const rockerFingerJoint = useRevoluteJoint(
+    rockerRef as RefObject<RapierRigidBody>,
+    fingerRef as RefObject<RapierRigidBody>,
+    [
+      rockerEnd.toArray(),
+      [0, 0, 0],
+      axis,
+      [
+        CLAW_GEOMETRY.minimumAngle - 0.18,
+        CLAW_GEOMETRY.maximumAngle + 0.18,
+      ],
     ],
   );
 
   useFrame(() => {
     const settings = useGameStore.getState().settings;
     const pose = getClawPose(closure.current);
-    joint.current?.configureMotorModel(rapier.MotorModel.ForceBased);
-    joint.current?.configureMotorPosition(
-      pose.angle,
+    const rockerRotation = pose.rockerAngle - openPose.rockerAngle;
+    const fingerRelativeAngle = pose.angle - rockerRotation;
+    housingRockerJoint.current?.configureMotorModel(
+      rapier.MotorModel.ForceBased,
+    );
+    housingRockerJoint.current?.configureMotorPosition(
+      rockerRotation,
+      settings.clawStrength * 4.6,
+      7.2 + settings.clawStrength * 0.18,
+    );
+    rockerFingerJoint.current?.configureMotorModel(
+      rapier.MotorModel.ForceBased,
+    );
+    rockerFingerJoint.current?.configureMotorPosition(
+      fingerRelativeAngle,
       settings.clawStrength * 3.8,
       6.5 + settings.clawStrength * 0.16,
     );
@@ -304,9 +341,10 @@ function FingerJoint({
 function ClawFinger({
   index,
   housingRef,
+  rockerRef,
   fingerRef,
   closure,
-}: FingerJointProps) {
+}: FingerLinkageProps) {
   const geometry = CLAW_GEOMETRY;
   const clawFriction = useGameStore(
     (state) => state.settings.clawFriction,
@@ -323,20 +361,107 @@ function ClawFinger({
         ),
     );
     const strip = createFingerStripGeometry(index);
+    const openPose = getClawPose(0);
+    const housingPivot = radialPoint(
+      index,
+      geometry.housingPivot.r,
+      geometry.housingPivot.y,
+    );
+    const openHinge = radialPoint(
+      index,
+      openPose.hinge.r,
+      openPose.hinge.y,
+    );
+    const rockerEnd = openHinge.clone().sub(housingPivot);
+    const hingeAxis = new THREE.Vector3(...radialAxis(index));
+    const pinQuaternion = new THREE.Quaternion().setFromUnitVectors(
+      Y_AXIS,
+      hingeAxis,
+    );
     return {
       geometry: strip.geometry,
-      driveTail: strip.driveTail,
-      driveSlot: strip.driveSlot,
+      plungerArm: strip.plungerArm,
+      plungerArmEnd: strip.plungerArmEnd,
+      rockerLink: plateBetween(
+        new THREE.Vector3(),
+        rockerEnd,
+        hingeAxis,
+      ),
+      rockerEnd: rockerEnd.toArray() as [number, number, number],
+      pinQuaternion:
+        pinQuaternion.toArray() as [number, number, number, number],
       segments: points.slice(0, -1).map((point, segmentIndex) =>
         between(point, points[segmentIndex + 1]),
       ),
       tip: points.at(-1)!.toArray() as [number, number, number],
     };
   }, [geometry, index]);
-  const hinge = radialPoint(index, geometry.hingeRadius, geometry.hingeY);
+  const openPose = getClawPose(0);
+  const housingPivot = radialPoint(
+    index,
+    geometry.housingPivot.r,
+    geometry.housingPivot.y,
+  );
+  const hinge = radialPoint(index, openPose.hinge.r, openPose.hinge.y);
 
   return (
     <>
+      <RigidBody
+        ref={rockerRef}
+        colliders={false}
+        position={[
+          BODY_INITIAL_POSITION[0] + housingPivot.x,
+          BODY_INITIAL_POSITION[1] + housingPivot.y,
+          BODY_INITIAL_POSITION[2] + housingPivot.z,
+        ]}
+        linearDamping={0.2}
+        angularDamping={0.68}
+        canSleep={false}
+        ccd
+        name={`claw-rocker-link-${index + 1}`}
+      >
+        <CapsuleCollider
+          args={[
+            Math.max(0.02, shape.rockerLink.length / 2 - 0.035),
+            0.035,
+          ]}
+          position={shape.rockerLink.position}
+          quaternion={shape.rockerLink.quaternion}
+          mass={0.055}
+          collisionGroups={HOUSING_COLLISION_GROUPS}
+        />
+        <mesh
+          castShadow
+          position={shape.rockerLink.position}
+          quaternion={shape.rockerLink.quaternion}
+        >
+          <boxGeometry args={[0.078, shape.rockerLink.length, 0.028]} />
+          <meshStandardMaterial
+            color="#aeb2af"
+            metalness={0.93}
+            roughness={0.22}
+          />
+        </mesh>
+        {[
+          [0, 0, 0],
+          shape.rockerEnd,
+        ].map((position, pivotIndex) => (
+          <mesh
+            key={pivotIndex}
+            castShadow
+            position={position as [number, number, number]}
+            quaternion={shape.pinQuaternion}
+          >
+            <cylinderGeometry args={[0.058, 0.058, 0.115, 18]} />
+            <meshStandardMaterial
+              color="#777c78"
+              metalness={0.94}
+              roughness={0.22}
+            />
+          </mesh>
+        ))}
+      </RigidBody>
+
       <RigidBody
         ref={fingerRef}
         colliders={false}
@@ -387,13 +512,13 @@ function ClawFinger({
         </mesh>
         <mesh
           castShadow
-          position={shape.driveTail.position}
-          quaternion={shape.driveTail.quaternion}
+          position={shape.plungerArm.position}
+          quaternion={shape.plungerArm.quaternion}
         >
           <boxGeometry
             args={[
               geometry.fingerWidth * 0.9,
-              shape.driveTail.length,
+              shape.plungerArm.length,
               geometry.fingerThickness,
             ]}
           />
@@ -404,23 +529,25 @@ function ClawFinger({
           />
         </mesh>
         <mesh
-          position={shape.driveSlot.position}
-          quaternion={shape.driveSlot.quaternion}
+          castShadow
+          position={shape.plungerArmEnd}
+          quaternion={shape.pinQuaternion}
         >
-          <boxGeometry
+          <cylinderGeometry
             args={[
-              geometry.fingerWidth * 0.3,
-              shape.driveSlot.length,
-              geometry.fingerThickness * 1.08,
+              geometry.fingerWidth * 0.66,
+              geometry.fingerWidth * 0.66,
+              0.096,
+              18,
             ]}
           />
           <meshStandardMaterial
-            color="#4d524f"
-            metalness={0.82}
-            roughness={0.3}
+            color="#c8cbc8"
+            metalness={0.94}
+            roughness={0.18}
           />
         </mesh>
-        <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+        <mesh castShadow quaternion={shape.pinQuaternion}>
           <cylinderGeometry
             args={[geometry.fingerWidth * 0.72, geometry.fingerWidth * 0.72, 0.1, 18]}
           />
@@ -445,9 +572,10 @@ function ClawFinger({
         </mesh>
       </RigidBody>
 
-      <FingerJoint
+      <FingerLinkageJoints
         index={index}
         housingRef={housingRef}
+        rockerRef={rockerRef}
         fingerRef={fingerRef}
         closure={closure}
       />
@@ -582,6 +710,11 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const anchorRef = useRef<RapierRigidBody>(null);
   const housingRef = useRef<RapierRigidBody>(null);
   const fingerRefs = [
+    useRef<RapierRigidBody>(null),
+    useRef<RapierRigidBody>(null),
+    useRef<RapierRigidBody>(null),
+  ];
+  const rockerRefs = [
     useRef<RapierRigidBody>(null),
     useRef<RapierRigidBody>(null),
     useRef<RapierRigidBody>(null),
@@ -910,7 +1043,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         minFps: Math.round(Math.min(minFps.current, fps)),
         physicsMs: Number((performance.now() - started).toFixed(2)),
         activeBodies:
-          Object.values(bodies.current).filter(Boolean).length + 5,
+          Object.values(bodies.current).filter(Boolean).length + 8,
         cableError: Number((cableState.overrun * 1000).toFixed(1)),
         cableLength: Number(cableLength.current.toFixed(2)),
         cableDistance: Number(cableState.distance.toFixed(2)),
@@ -1075,7 +1208,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
                 </mesh>
                 <mesh
                   castShadow
-                  position={[CLAW_GEOMETRY.drivePinRadius, 0, 0]}
+                  position={[CLAW_GEOMETRY.plungerRadius, 0, 0]}
                   rotation={[Math.PI / 2, 0, 0]}
                 >
                   <cylinderGeometry args={[0.024, 0.024, 0.075, 12]} />
@@ -1092,68 +1225,22 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
 
         {Array.from({ length: FINGER_COUNT }, (_, index) => {
           const theta = thetaForIndex(index);
-          const bracketLength = Math.hypot(
-            CLAW_GEOMETRY.hingeRadius - CLAW_GEOMETRY.bracketTop.r,
-            CLAW_GEOMETRY.hingeY - CLAW_GEOMETRY.bracketTop.y,
-          );
-          const bracketTilt = -Math.atan2(
-            CLAW_GEOMETRY.hingeRadius - CLAW_GEOMETRY.bracketTop.r,
-            CLAW_GEOMETRY.bracketTop.y - CLAW_GEOMETRY.hingeY,
-          );
           return (
-            <group
-              key={index}
-              rotation={[0, -theta, 0]}
-            >
-              {[-0.055, 0.055].map((z) => (
-                <mesh
-                  key={z}
-                  castShadow
-                  position={[
-                    (CLAW_GEOMETRY.bracketTop.r + CLAW_GEOMETRY.hingeRadius) / 2,
-                    (CLAW_GEOMETRY.bracketTop.y + CLAW_GEOMETRY.hingeY) / 2,
-                    z,
-                  ]}
-                  rotation={[0, 0, bracketTilt]}
-                >
-                  <boxGeometry args={[0.066, bracketLength, 0.026]} />
-                  <meshStandardMaterial
-                    color="#aeb2af"
-                    metalness={0.93}
-                    roughness={0.22}
-                  />
-                </mesh>
-              ))}
+            <group key={index} rotation={[0, -theta, 0]}>
               <mesh
                 castShadow
                 position={[
-                  CLAW_GEOMETRY.bracketTop.r,
-                  CLAW_GEOMETRY.bracketTop.y,
+                  CLAW_GEOMETRY.housingPivot.r,
+                  CLAW_GEOMETRY.housingPivot.y,
                   0,
                 ]}
                 rotation={[Math.PI / 2, 0, 0]}
               >
-                <cylinderGeometry args={[0.052, 0.052, 0.14, 16]} />
+                <cylinderGeometry args={[0.052, 0.052, 0.16, 16]} />
                 <meshStandardMaterial
                   color="#747975"
                   metalness={0.92}
                   roughness={0.24}
-                />
-              </mesh>
-              <mesh
-                castShadow
-                position={[
-                  CLAW_GEOMETRY.hingeRadius,
-                  CLAW_GEOMETRY.hingeY,
-                  0,
-                ]}
-                rotation={[Math.PI / 2, 0, 0]}
-              >
-                <cylinderGeometry args={[0.062, 0.062, 0.145, 18]} />
-                <meshStandardMaterial
-                  color="#777c78"
-                  metalness={0.94}
-                  roughness={0.22}
                 />
               </mesh>
               {[-0.083, 0.083].map((z) => (
@@ -1161,13 +1248,13 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
                   key={z}
                   castShadow
                   position={[
-                    CLAW_GEOMETRY.hingeRadius,
-                    CLAW_GEOMETRY.hingeY,
+                    CLAW_GEOMETRY.housingPivot.r,
+                    CLAW_GEOMETRY.housingPivot.y,
                     z,
                   ]}
                   rotation={[Math.PI / 2, 0, 0]}
                 >
-                  <cylinderGeometry args={[0.072, 0.072, 0.018, 18]} />
+                  <cylinderGeometry args={[0.066, 0.066, 0.018, 18]} />
                   <meshStandardMaterial
                     color="#c9ccca"
                     metalness={0.96}
@@ -1177,8 +1264,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
               ))}
               <mesh
                 position={[
-                  CLAW_GEOMETRY.hingeRadius,
-                  CLAW_GEOMETRY.hingeY,
+                  CLAW_GEOMETRY.housingPivot.r,
+                  CLAW_GEOMETRY.housingPivot.y,
                   0.094,
                 ]}
                 rotation={[Math.PI / 2, 0, 0]}
@@ -1200,6 +1287,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
           key={index}
           index={index}
           housingRef={housingRef}
+          rockerRef={rockerRefs[index]}
           fingerRef={fingerRefs[index]}
           closure={closure}
         />

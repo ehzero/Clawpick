@@ -7,8 +7,9 @@ import {
   sampleClawClearance,
 } from "../game/clawKinematics.mjs";
 
-test("each curved finger has one hinge and stays inside its hard limits", () => {
-  assert.equal(CLAW_GEOMETRY.jointsPerFinger, 1);
+test("each curved finger stays rigid while its two linkage pivots move", () => {
+  assert.equal(CLAW_GEOMETRY.rigidSegmentsPerFinger, 1);
+  assert.equal(CLAW_GEOMETRY.linkageJointsPerFinger, 2);
   assert.ok(CLAW_GEOMETRY.curvePoints.length >= 6);
   assert.ok(CLAW_GEOMETRY.fingerWidth > CLAW_GEOMETRY.fingerThickness);
   assert.notEqual(
@@ -23,26 +24,44 @@ test("each curved finger has one hinge and stays inside its hard limits", () => 
     assert.ok(pose.angle <= CLAW_GEOMETRY.maximumAngle);
     assert.ok(
       Math.abs(
-        pose.drivePin.r -
-          pose.hinge.r -
-          pose.driveDirection.r * pose.driveTravel,
+        Math.hypot(
+          pose.hinge.r - pose.housingPivot.r,
+          pose.hinge.y - pose.housingPivot.y,
+        ) - CLAW_GEOMETRY.rockerLength,
       ) < 1e-9,
-      "the yoke pin must remain on the rotating finger slot",
+      "the housing-to-finger rocker must keep a fixed length",
     );
     assert.ok(
       Math.abs(
-        pose.drivePin.y -
-          pose.hinge.y -
-          pose.driveDirection.y * pose.driveTravel,
+        Math.hypot(
+          pose.plungerPin.r - pose.hinge.r,
+          pose.plungerPin.y - pose.hinge.y,
+        ) - CLAW_GEOMETRY.fingerPlungerLength,
       ) < 1e-9,
-      "the plunger height must be derived from the slot intersection",
+      "the rigid finger root must keep its distance from the plunger",
     );
-    assert.ok(pose.driveTravel >= CLAW_GEOMETRY.driveSlotStart);
-    assert.ok(pose.driveTravel <= CLAW_GEOMETRY.driveSlotEnd);
+    const rootR =
+      pose.hinge.r +
+      Math.cos(pose.angle) *
+        CLAW_GEOMETRY.fingerPlungerDirection.r *
+        CLAW_GEOMETRY.fingerPlungerLength -
+      Math.sin(pose.angle) *
+        CLAW_GEOMETRY.fingerPlungerDirection.y *
+        CLAW_GEOMETRY.fingerPlungerLength;
+    const rootY =
+      pose.hinge.y +
+      Math.sin(pose.angle) *
+        CLAW_GEOMETRY.fingerPlungerDirection.r *
+        CLAW_GEOMETRY.fingerPlungerLength +
+      Math.cos(pose.angle) *
+        CLAW_GEOMETRY.fingerPlungerDirection.y *
+        CLAW_GEOMETRY.fingerPlungerLength;
+    assert.ok(Math.abs(rootR - pose.plungerPin.r) < 1e-9);
+    assert.ok(Math.abs(rootY - pose.plungerPin.y) < 1e-9);
   }
 });
 
-test("the shared plunger rises through a visible stroke as the fingers close", () => {
+test("the rising plunger swings the moving finger hinge away from the body", () => {
   const open = getClawPose(0);
   const closed = getClawPose(1);
 
@@ -51,8 +70,11 @@ test("the shared plunger rises through a visible stroke as the fingers close", (
     closed.plungerY - open.plungerY > 0.12,
     "the common actuator stroke should remain visible",
   );
-  assert.ok(CLAW_GEOMETRY.bracketTop.y > CLAW_GEOMETRY.hingeY);
-  assert.ok(CLAW_GEOMETRY.bracketTop.r < CLAW_GEOMETRY.hingeRadius);
+  assert.ok(
+    closed.hinge.r - open.hinge.r > 0.02,
+    "the moving hinge should swing outward as the plunger rises",
+  );
+  assert.notEqual(closed.rockerAngle, open.rockerAngle);
 });
 
 test("three scoops retain physical clearance throughout closure", () => {
@@ -83,14 +105,15 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   assert.match(source, /createFingerStripGeometry/);
   assert.doesNotMatch(source, /<tubeGeometry/);
   assert.match(source, /umbilicalRef/);
-  assert.match(source, /driveTail/);
-  assert.match(source, /driveSlot/);
+  assert.match(source, /rockerLink/);
+  assert.match(source, /plungerArm/);
+  assert.doesNotMatch(source, /driveTail|driveSlot/);
   assert.doesNotMatch(source, /serviceCableRef|SERVICE_CABLE_SEGMENTS/);
   assert.doesNotMatch(
     source,
     /connectorRefOne|connectorLength|connectorPoint/,
   );
-  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 1);
+  assert.equal(source.match(/useRevoluteJoint\(/g)?.length, 2);
   assert.doesNotMatch(source, /proximalLength|distalLength|bendAngle|shape\.knee/);
   assert.match(source, /JointData\.rope\(\s*cableLength\.current/);
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);

@@ -116,7 +116,7 @@ export default function ClawLab() {
               <GameCanvas />
 
               <div className="viewport-badge">
-                <span>4-BODY CLAW</span>
+                <span>7-BODY LINKAGE</span>
                 RAPIER · 60 HZ
               </div>
               <div className="camera-hint" aria-hidden="true">
@@ -193,8 +193,8 @@ export default function ClawLab() {
             <article>
               <span>01</span>
               <div>
-                <strong>단일 힌지 곡선 집게</strong>
-                <p>관절 하나를 가진 세 곡선 발을 플런저가 동기 구동</p>
+                <strong>로커 링크 곡선 집게</strong>
+                <p>플런저 상승이 이동 힌지를 밀어 세 곡선 발을 동기 구동</p>
               </div>
             </article>
             <article>

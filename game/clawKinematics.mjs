@@ -1,9 +1,8 @@
 const DEG = Math.PI / 180;
 
 export const CLAW_GEOMETRY = Object.freeze({
-  hingeRadius: 0.31,
-  hingeY: -0.32,
-  jointsPerFinger: 1,
+  rigidSegmentsPerFinger: 1,
+  linkageJointsPerFinger: 2,
   curvePoints: Object.freeze([
     Object.freeze({ r: 0, y: 0 }),
     Object.freeze({ r: 0.01, y: -0.12 }),
@@ -16,19 +15,19 @@ export const CLAW_GEOMETRY = Object.freeze({
   fingerThickness: 0.032,
   tineRadius: 0.038,
   scoopRadius: 0.065,
-  openAngle: 50 * DEG,
-  closedAngle: 12 * DEG,
   minimumAngle: 10 * DEG,
   maximumAngle: 54 * DEG,
-  drivePinRadius: 0.12,
-  driveSlotDirection: Object.freeze({
+  housingPivot: Object.freeze({ r: 0.23, y: 0.12 }),
+  openFingerHinge: Object.freeze({ r: 0.31, y: -0.32 }),
+  plungerRadius: 0.12,
+  openPlungerY: -0.42,
+  closedPlungerY: -0.278,
+  fingerPlungerDirection: Object.freeze({
     r: Math.cos(158 * DEG),
     y: Math.sin(158 * DEG),
   }),
-  driveTailLength: 0.245,
-  driveSlotStart: 0.165,
-  driveSlotEnd: 0.235,
-  bracketTop: Object.freeze({ r: 0.23, y: 0.12 }),
+  rockerLength: Math.hypot(0.31 - 0.23, -0.32 - 0.12),
+  fingerPlungerLength: Math.hypot(0.12 - 0.31, -0.42 + 0.32),
 });
 
 export function clampClosure(value) {
@@ -41,16 +40,52 @@ export function smoothClosure(value) {
 }
 
 /**
- * Solves the shared plunger and direct pin-in-slot pose in a radial plane.
+ * Solves the shared plunger, rocker link, and rigid finger in a radial plane.
  * `r` points out from the claw centre and `y` points upward.
  */
 export function getClawPose(closure) {
   const geometry = CLAW_GEOMETRY;
   const t = smoothClosure(closure);
-  const angle =
-    geometry.openAngle +
-    (geometry.closedAngle - geometry.openAngle) * t;
-  const hinge = { r: geometry.hingeRadius, y: geometry.hingeY };
+  const housingPivot = geometry.housingPivot;
+  const plungerY =
+    geometry.openPlungerY +
+    (geometry.closedPlungerY - geometry.openPlungerY) * t;
+  const plungerPin = { r: geometry.plungerRadius, y: plungerY };
+  const deltaR = plungerPin.r - housingPivot.r;
+  const deltaY = plungerPin.y - housingPivot.y;
+  const pivotDistance = Math.hypot(deltaR, deltaY);
+  const along =
+    (geometry.rockerLength * geometry.rockerLength -
+      geometry.fingerPlungerLength * geometry.fingerPlungerLength +
+      pivotDistance * pivotDistance) /
+    (2 * pivotDistance);
+  const perpendicular = Math.sqrt(
+    Math.max(
+      0,
+      geometry.rockerLength * geometry.rockerLength - along * along,
+    ),
+  );
+  const baseR = housingPivot.r + (along * deltaR) / pivotDistance;
+  const baseY = housingPivot.y + (along * deltaY) / pivotDistance;
+  const hinge = {
+    r: baseR - (perpendicular * deltaY) / pivotDistance,
+    y: baseY + (perpendicular * deltaR) / pivotDistance,
+  };
+  const fingerRootAngle = Math.atan2(
+    plungerPin.y - hinge.y,
+    plungerPin.r - hinge.r,
+  );
+  const localRootAngle = Math.atan2(
+    geometry.fingerPlungerDirection.y,
+    geometry.fingerPlungerDirection.r,
+  );
+  let angle = fingerRootAngle - localRootAngle;
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle < -Math.PI) angle += Math.PI * 2;
+  const rockerAngle = Math.atan2(
+    hinge.y - housingPivot.y,
+    hinge.r - housingPivot.r,
+  );
   const rotatePoint = (point) => ({
     r:
       hinge.r +
@@ -64,27 +99,15 @@ export function getClawPose(closure) {
   const tip = rotatePoint(
     geometry.curvePoints[geometry.curvePoints.length - 1],
   );
-  const driveDirection = {
-    r:
-      Math.cos(angle) * geometry.driveSlotDirection.r -
-      Math.sin(angle) * geometry.driveSlotDirection.y,
-    y:
-      Math.sin(angle) * geometry.driveSlotDirection.r +
-      Math.cos(angle) * geometry.driveSlotDirection.y,
-  };
-  const driveTravel =
-    (geometry.drivePinRadius - hinge.r) / driveDirection.r;
-  const plungerY = hinge.y + driveDirection.y * driveTravel;
-  const drivePin = { r: geometry.drivePinRadius, y: plungerY };
 
   return {
     closure: t,
     angle,
+    rockerAngle,
+    housingPivot,
     hinge,
     tip,
-    driveDirection,
-    driveTravel,
-    drivePin,
+    plungerPin,
     plungerY,
     tipSeparation: Math.sqrt(3) * Math.abs(tip.r),
   };
