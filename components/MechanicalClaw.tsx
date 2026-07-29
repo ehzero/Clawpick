@@ -37,8 +37,8 @@ export const CHUTE_Z = 1.18;
 
 const CABLE_ANCHOR_Y = TROLLEY_Y - 0.18;
 const MIN_CABLE_LENGTH = 0.04;
-const MAX_CABLE_LENGTH = 2.05;
-const CLAW_ATTACHMENT_Y = 0.38;
+const MAX_CABLE_LENGTH = 1.8;
+const CLAW_ATTACHMENT_Y = 0.48;
 const CLAW_START_Y =
   CABLE_ANCHOR_Y - MIN_CABLE_LENGTH - CLAW_ATTACHMENT_Y;
 const CLAW_LIMIT_X = 2.32;
@@ -52,6 +52,8 @@ const BODY_INITIAL_POSITION: [number, number, number] = [
 ];
 const HOUSING_COLLISION_GROUPS = interactionGroups([1], [0]);
 const FINGER_COLLISION_GROUPS = interactionGroups([2], [0, 2]);
+const UMBILICAL_SEGMENTS = 48;
+const SERVICE_CABLE_SEGMENTS = 28;
 
 interface MechanicalClawProps {
   bodies: MutableRefObject<Record<string, RapierRigidBody | null>>;
@@ -104,6 +106,86 @@ function between(start: THREE.Vector3, end: THREE.Vector3): SegmentTransform {
   };
 }
 
+function createFingerStripGeometry(index: number) {
+  const theta = thetaForIndex(index);
+  const radial = new THREE.Vector3(Math.cos(theta), 0, Math.sin(theta));
+  const hingeAxis = new THREE.Vector3(-Math.sin(theta), 0, Math.cos(theta));
+  const controlPoints = CLAW_GEOMETRY.curvePoints.map(
+    (point) =>
+      new THREE.Vector3(
+        radial.x * point.r,
+        point.y,
+        radial.z * point.r,
+      ),
+  );
+  const curve = new THREE.CatmullRomCurve3(
+    controlPoints,
+    false,
+    "centripetal",
+  );
+  const samples = 24;
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    const point = curve.getPoint(t);
+    const pathTangent = curve.getTangent(t).normalize();
+    const faceNormal = hingeAxis.clone().cross(pathTangent).normalize();
+    const halfWidth = CLAW_GEOMETRY.fingerWidth / 2;
+    const halfThickness = CLAW_GEOMETRY.fingerThickness / 2;
+    const corners = [
+      point
+        .clone()
+        .addScaledVector(hingeAxis, -halfWidth)
+        .addScaledVector(faceNormal, -halfThickness),
+      point
+        .clone()
+        .addScaledVector(hingeAxis, halfWidth)
+        .addScaledVector(faceNormal, -halfThickness),
+      point
+        .clone()
+        .addScaledVector(hingeAxis, halfWidth)
+        .addScaledVector(faceNormal, halfThickness),
+      point
+        .clone()
+        .addScaledVector(hingeAxis, -halfWidth)
+        .addScaledVector(faceNormal, halfThickness),
+    ];
+
+    for (const corner of corners) positions.push(...corner.toArray());
+  }
+
+  for (let index = 0; index < samples; index += 1) {
+    const current = index * 4;
+    const next = (index + 1) * 4;
+    for (let side = 0; side < 4; side += 1) {
+      const followingSide = (side + 1) % 4;
+      indices.push(
+        current + side,
+        next + side,
+        next + followingSide,
+        current + side,
+        next + followingSide,
+        current + followingSide,
+      );
+    }
+  }
+  indices.push(0, 2, 1, 0, 3, 2);
+  const last = samples * 4;
+  indices.push(last, last + 1, last + 2, last, last + 2, last + 3);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3),
+  );
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  return { curve, geometry };
+}
+
 function setMeshBetween(
   mesh: THREE.Mesh | null,
   start: THREE.Vector3,
@@ -117,12 +199,35 @@ function setMeshBetween(
   mesh.scale.set(1, length, 1);
 }
 
+function setInstanceBetween(
+  mesh: THREE.InstancedMesh | null,
+  index: number,
+  start: THREE.Vector3,
+  end: THREE.Vector3,
+) {
+  if (!mesh) return;
+  const direction = end.clone().sub(start);
+  const length = direction.length();
+  const midpoint = start.clone().add(end).multiplyScalar(0.5);
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(
+    Y_AXIS,
+    direction.normalize(),
+  );
+  const matrix = new THREE.Matrix4().compose(
+    midpoint,
+    quaternion,
+    new THREE.Vector3(1, length, 1),
+  );
+  mesh.setMatrixAt(index, matrix);
+}
+
 function FingerJoint({
   index,
   housingRef,
   fingerRef,
   closure,
 }: FingerJointProps) {
+  const { rapier } = useRapier();
   const hinge = radialPoint(
     index,
     CLAW_GEOMETRY.hingeRadius,
@@ -143,10 +248,11 @@ function FingerJoint({
   useFrame(() => {
     const settings = useGameStore.getState().settings;
     const pose = getClawPose(closure.current);
+    joint.current?.configureMotorModel(rapier.MotorModel.ForceBased);
     joint.current?.configureMotorPosition(
       pose.angle,
-      settings.clawStrength * 5.5,
-      8 + settings.clawStrength * 0.12,
+      settings.clawStrength * 3.8,
+      6.5 + settings.clawStrength * 0.16,
     );
   });
 
@@ -174,12 +280,9 @@ function ClawFinger({
           radial.z * point.r,
         ),
     );
+    const strip = createFingerStripGeometry(index);
     return {
-      curve: new THREE.CatmullRomCurve3(
-        points,
-        false,
-        "centripetal",
-      ),
+      geometry: strip.geometry,
       segments: points.slice(0, -1).map((point, segmentIndex) =>
         between(point, points[segmentIndex + 1]),
       ),
@@ -231,44 +334,35 @@ function ClawFinger({
           collisionGroups={FINGER_COLLISION_GROUPS}
         />
 
-        <mesh castShadow>
-          <sphereGeometry args={[0.105, 16, 12]} />
+        <mesh castShadow geometry={shape.geometry}>
           <meshStandardMaterial
-            color="#d9b875"
-            metalness={0.82}
-            roughness={0.24}
+            color="#d6d8d5"
+            metalness={0.96}
+            roughness={0.2}
           />
         </mesh>
-        <mesh castShadow>
-          <tubeGeometry
-            args={[shape.curve, 28, geometry.tineRadius, 12, false]}
+        <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry
+            args={[geometry.fingerWidth * 0.72, geometry.fingerWidth * 0.72, 0.1, 18]}
           />
           <meshStandardMaterial
-            color="#dfe2e0"
-            metalness={0.92}
-            roughness={0.16}
+            color="#c8cbc8"
+            metalness={0.94}
+            roughness={0.18}
           />
         </mesh>
         <mesh
           castShadow
           position={shape.tip}
           rotation={[0, -thetaForIndex(index), 0]}
-          scale={[1.2, 0.58, 0.82]}
+          scale={[1.06, 0.5, 0.72]}
         >
-          <sphereGeometry args={[0.105, 16, 12]} />
+          <sphereGeometry args={[0.075, 16, 12]} />
           <meshStandardMaterial
-            color="#d7dad8"
-            metalness={0.9}
-            roughness={0.2}
+            color="#c9ccc9"
+            metalness={0.92}
+            roughness={0.24}
           />
-        </mesh>
-        <mesh
-          position={shape.tip}
-          rotation={[0, -thetaForIndex(index), 0]}
-          scale={[1.05, 0.25, 0.68]}
-        >
-          <sphereGeometry args={[0.108, 14, 10]} />
-          <meshStandardMaterial color="#d94f38" roughness={0.62} />
         </mesh>
       </RigidBody>
 
@@ -329,8 +423,16 @@ function TrolleyMechanism({
 
       <group ref={trolleyRef}>
         <mesh castShadow position={[0, 4.02, 0]}>
-          <boxGeometry args={[0.64, 0.28, 0.48]} />
-          <meshStandardMaterial color="#e85239" metalness={0.55} roughness={0.28} />
+          <boxGeometry args={[0.88, 0.34, 0.64]} />
+          <meshStandardMaterial color="#242724" metalness={0.68} roughness={0.3} />
+        </mesh>
+        <mesh castShadow position={[0, 3.84, 0]}>
+          <cylinderGeometry args={[0.15, 0.15, 0.08, 24]} />
+          <meshStandardMaterial color="#b9bdb9" metalness={0.92} roughness={0.2} />
+        </mesh>
+        <mesh castShadow position={[0, 4.03, 0.326]}>
+          <boxGeometry args={[0.72, 0.22, 0.035]} />
+          <meshStandardMaterial color="#111311" metalness={0.35} roughness={0.48} />
         </mesh>
         <mesh castShadow position={[-0.16, 4.16, 0]}>
           <boxGeometry args={[0.24, 0.2, 0.34]} />
@@ -413,6 +515,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const connectorRefOne = useRef<THREE.Mesh>(null);
   const connectorRefTwo = useRef<THREE.Mesh>(null);
   const connectorRefThree = useRef<THREE.Mesh>(null);
+  const umbilicalRef = useRef<THREE.InstancedMesh>(null);
+  const serviceCableRef = useRef<THREE.InstancedMesh>(null);
   const debugTensionRef = useRef<THREE.Mesh>(null);
   const closure = useRef(0);
   const cableLength = useRef(MIN_CABLE_LENGTH);
@@ -425,21 +529,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const minFps = useRef(60);
   const ropeJoint = useRef<RopeImpulseJoint | null>(null);
   const ropeJointLength = useRef(Number.NaN);
-  const powerCable = useMemo(
-    () => {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array(30 * 3), 3),
-      );
-      return new THREE.Line(
-        geometry,
-        new THREE.LineBasicMaterial({ color: "#e6b84a" }),
-      );
-    },
-    [],
-  );
-  const powerCableRef = useRef<THREE.Line>(null);
   const debug = useGameStore((state) => state.debug);
   const clawFriction = useGameStore((state) => state.settings.clawFriction);
   const swingDamping = useGameStore(
@@ -687,34 +776,85 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
 
     setMeshBetween(cableRef.current, anchor, attachment);
 
-    const cableVector = attachment.clone().sub(anchor);
-    const cableDirection = cableVector.clone().normalize();
-    const side = new THREE.Vector3(1, 0, 0);
-    if (Math.abs(cableDirection.dot(side)) > 0.92) side.set(0, 0, 1);
-    side.cross(cableDirection).normalize();
-    const binormal = cableDirection.clone().cross(side).normalize();
-    const powerCablePosition = powerCableRef.current?.geometry.getAttribute(
-      "position",
-    ) as THREE.BufferAttribute | undefined;
-    const cablePoints = powerCablePosition?.array as Float32Array | undefined;
-    for (let index = 0; index < 30; index += 1) {
-      const t = index / 29;
-      const coilRadius = 0.045 * Math.sin(Math.PI * t);
-      const phaseAngle = t * Math.PI * 18;
-      const point = anchor
-        .clone()
-        .lerp(attachment, t)
-        .addScaledVector(side, Math.cos(phaseAngle) * coilRadius)
-        .addScaledVector(binormal, Math.sin(phaseAngle) * coilRadius);
-      if (cablePoints) {
-        cablePoints[index * 3] = point.x;
-        cablePoints[index * 3 + 1] = point.y;
-        cablePoints[index * 3 + 2] = point.z;
-      }
+    const umbilicalTop = anchor
+      .clone()
+      .add(new THREE.Vector3(-0.29, 0.03, -0.04));
+    const umbilicalBottomOffset = new THREE.Vector3(
+      -0.24,
+      0.19,
+      -0.02,
+    ).applyQuaternion(housingQuaternion);
+    const umbilicalBottom = new THREE.Vector3(
+      bodyPosition.x,
+      bodyPosition.y,
+      bodyPosition.z,
+    ).add(umbilicalBottomOffset);
+    const umbilicalPoints: THREE.Vector3[] = [];
+    for (let index = 0; index <= UMBILICAL_SEGMENTS; index += 1) {
+      const t = index / UMBILICAL_SEGMENTS;
+      const sag = Math.sin(Math.PI * t);
+      const phaseAngle = t * Math.PI * 24;
+      const coilRadius = 0.006 + 0.022 * Math.sin(Math.PI * t);
+      umbilicalPoints.push(
+        umbilicalTop
+          .clone()
+          .lerp(umbilicalBottom, t)
+          .add(new THREE.Vector3(-0.12 * sag, -0.055 * sag, 0))
+          .add(
+            new THREE.Vector3(
+              Math.cos(phaseAngle) * coilRadius,
+              0,
+              Math.sin(phaseAngle) * coilRadius,
+            ),
+          ),
+      );
     }
-    if (powerCablePosition && powerCableRef.current) {
-      powerCablePosition.needsUpdate = true;
-      powerCableRef.current.geometry.computeBoundingSphere();
+    for (let index = 0; index < UMBILICAL_SEGMENTS; index += 1) {
+      setInstanceBetween(
+        umbilicalRef.current,
+        index,
+        umbilicalPoints[index],
+        umbilicalPoints[index + 1],
+      );
+    }
+    if (umbilicalRef.current) {
+      umbilicalRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    const serviceTop = anchor
+      .clone()
+      .add(new THREE.Vector3(0.25, 0.01, 0.04));
+    const serviceBottomOffset = new THREE.Vector3(
+      0.23,
+      0.2,
+      0.04,
+    ).applyQuaternion(housingQuaternion);
+    const serviceBottom = new THREE.Vector3(
+      bodyPosition.x,
+      bodyPosition.y,
+      bodyPosition.z,
+    ).add(serviceBottomOffset);
+    const servicePoints: THREE.Vector3[] = [];
+    for (let index = 0; index <= SERVICE_CABLE_SEGMENTS; index += 1) {
+      const t = index / SERVICE_CABLE_SEGMENTS;
+      const sag = Math.sin(Math.PI * t);
+      servicePoints.push(
+        serviceTop
+          .clone()
+          .lerp(serviceBottom, t)
+          .add(new THREE.Vector3(0.17 * sag, -0.09 * sag, 0.04 * sag)),
+      );
+    }
+    for (let index = 0; index < SERVICE_CABLE_SEGMENTS; index += 1) {
+      setInstanceBetween(
+        serviceCableRef.current,
+        index,
+        servicePoints[index],
+        servicePoints[index + 1],
+      );
+    }
+    if (serviceCableRef.current) {
+      serviceCableRef.current.instanceMatrix.needsUpdate = true;
     }
 
     const pose = getClawPose(closure.current);
@@ -808,10 +948,31 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       />
 
       <mesh ref={cableRef} castShadow>
-        <cylinderGeometry args={[0.018, 0.018, 1, 10]} />
-        <meshStandardMaterial color="#20211f" metalness={0.82} roughness={0.28} />
+        <cylinderGeometry args={[0.012, 0.012, 1, 10]} />
+        <meshStandardMaterial color="#7b1f27" metalness={0.42} roughness={0.42} />
       </mesh>
-      <primitive ref={powerCableRef} object={powerCable} />
+      <instancedMesh
+        ref={umbilicalRef}
+        args={[undefined, undefined, UMBILICAL_SEGMENTS]}
+        castShadow
+      >
+        <cylinderGeometry args={[0.021, 0.021, 1, 7]} />
+        <meshStandardMaterial color="#171918" roughness={0.7} />
+      </instancedMesh>
+      <instancedMesh
+        ref={serviceCableRef}
+        args={[undefined, undefined, SERVICE_CABLE_SEGMENTS]}
+      >
+        <cylinderGeometry args={[0.008, 0.008, 1, 6]} />
+        <meshPhysicalMaterial
+          color="#c7d8d8"
+          transparent
+          opacity={0.48}
+          roughness={0.12}
+          transmission={0.15}
+          depthWrite={false}
+        />
+      </instancedMesh>
       {debug && (
         <mesh ref={debugTensionRef}>
           <cylinderGeometry args={[0.008, 0.008, 1, 6]} />
@@ -824,104 +985,233 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         colliders={false}
         position={BODY_INITIAL_POSITION}
         linearDamping={0.18 + swingDamping * 0.28}
-        angularDamping={swingDamping}
+        angularDamping={0.35 + swingDamping * 0.72}
         enabledRotations={[false, true, false]}
         canSleep={false}
         ccd
         name="claw-solenoid-housing"
       >
         <CylinderCollider
-          args={[0.2, 0.235]}
-          position={[0, 0.02, 0]}
+          args={[0.23, 0.22]}
+          position={[0, 0.17, 0]}
           friction={clawFriction}
           restitution={0.02}
-          mass={0.72}
+          mass={0.78}
           collisionGroups={HOUSING_COLLISION_GROUPS}
         />
         <CylinderCollider
-          args={[0.055, 0.12]}
-          position={[0, 0.29, 0]}
+          args={[0.14, 0.185]}
+          position={[0, -0.08, 0]}
           friction={clawFriction}
-          mass={0.18}
+          mass={0.24}
           collisionGroups={HOUSING_COLLISION_GROUPS}
         />
 
-        <mesh castShadow position={[0, 0.03, 0]}>
-          <cylinderGeometry args={[0.225, 0.255, 0.42, 28]} />
+        <mesh castShadow position={[0, 0.29, 0]}>
+          <cylinderGeometry args={[0.17, 0.205, 0.25, 32]} />
           <meshStandardMaterial
-            color="#e84e36"
-            metalness={0.62}
-            roughness={0.24}
+            color="#cfd2cf"
+            metalness={0.96}
+            roughness={0.17}
           />
         </mesh>
-        <mesh castShadow position={[0, 0.25, 0]}>
-          <cylinderGeometry args={[0.13, 0.19, 0.12, 24]} />
+        <mesh castShadow position={[0, 0.115, 0]}>
+          <cylinderGeometry args={[0.225, 0.225, 0.16, 32]} />
           <meshStandardMaterial
-            color="#e8e6df"
-            metalness={0.88}
-            roughness={0.16}
+            color="#bfc3c0"
+            metalness={0.94}
+            roughness={0.2}
           />
         </mesh>
-        <mesh castShadow position={[0, 0.35, 0]}>
-          <torusGeometry args={[0.105, 0.03, 9, 22]} />
+        <mesh castShadow position={[0, -0.055, 0]}>
+          <cylinderGeometry args={[0.18, 0.18, 0.25, 32]} />
           <meshStandardMaterial
-            color="#b9a36c"
-            metalness={0.92}
+            color="#d9dcda"
+            metalness={0.97}
+            roughness={0.15}
+          />
+        </mesh>
+        {[0.4, 0.195, 0.035, -0.19].map((y, index) => (
+          <mesh key={y} castShadow position={[0, y, 0]}>
+            <torusGeometry
+              args={[index === 0 ? 0.145 : index === 3 ? 0.19 : 0.205, 0.018, 8, 28]}
+            />
+            <meshStandardMaterial
+              color="#aeb3b0"
+              metalness={0.98}
+              roughness={0.14}
+            />
+          </mesh>
+        ))}
+        <mesh castShadow position={[0, 0.455, 0]}>
+          <cylinderGeometry args={[0.085, 0.105, 0.09, 24]} />
+          <meshStandardMaterial
+            color="#b8bcb9"
+            metalness={0.96}
             roughness={0.18}
           />
         </mesh>
-        <mesh castShadow position={[0, -0.16, 0]}>
-          <cylinderGeometry args={[0.31, 0.31, 0.075, 28]} />
+        <mesh castShadow position={[0, 0.505, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.055, 0.015, 8, 20]} />
           <meshStandardMaterial
-            color="#3a3c38"
-            metalness={0.72}
-            roughness={0.28}
+            color="#737874"
+            metalness={0.9}
+            roughness={0.24}
           />
         </mesh>
+        <mesh castShadow position={[0, -0.205, 0]}>
+          <cylinderGeometry args={[0.245, 0.245, 0.075, 30]} />
+          <meshStandardMaterial
+            color="#aeb2af"
+            metalness={0.94}
+            roughness={0.2}
+          />
+        </mesh>
+
         <group ref={plungerRef}>
+          <mesh castShadow position={[0, 0.27, 0]}>
+            <cylinderGeometry args={[0.052, 0.052, 0.56, 18]} />
+            <meshStandardMaterial
+              color="#929794"
+              metalness={0.96}
+              roughness={0.16}
+            />
+          </mesh>
           <mesh castShadow>
-            <cylinderGeometry args={[0.075, 0.075, 0.34, 18]} />
+            <cylinderGeometry args={[0.13, 0.13, 0.065, 24]} />
             <meshStandardMaterial
-              color="#c7c9c4"
-              metalness={0.94}
-              roughness={0.12}
+              color="#b7bbb8"
+              metalness={0.95}
+              roughness={0.18}
             />
           </mesh>
-          <mesh castShadow position={[0, -0.15, 0]}>
-            <cylinderGeometry args={[0.145, 0.145, 0.055, 22]} />
-            <meshStandardMaterial
-              color="#d9b86f"
-              metalness={0.88}
-              roughness={0.19}
-            />
-          </mesh>
+          {Array.from({ length: FINGER_COUNT }, (_, index) => {
+            const theta = thetaForIndex(index);
+            return (
+              <group key={index} rotation={[0, -theta, 0]}>
+                <mesh castShadow position={[0.065, 0, 0]}>
+                  <boxGeometry args={[0.13, 0.045, 0.055]} />
+                  <meshStandardMaterial
+                    color="#aeb3b0"
+                    metalness={0.94}
+                    roughness={0.2}
+                  />
+                </mesh>
+                <mesh
+                  castShadow
+                  position={[CLAW_GEOMETRY.connectorRadius, 0, 0]}
+                  rotation={[Math.PI / 2, 0, 0]}
+                >
+                  <cylinderGeometry args={[0.024, 0.024, 0.075, 12]} />
+                  <meshStandardMaterial
+                    color="#686d69"
+                    metalness={0.9}
+                    roughness={0.24}
+                  />
+                </mesh>
+              </group>
+            );
+          })}
         </group>
+
         {Array.from({ length: FINGER_COUNT }, (_, index) => {
           const theta = thetaForIndex(index);
+          const bracketLength = Math.hypot(
+            CLAW_GEOMETRY.hingeRadius - CLAW_GEOMETRY.bracketTop.r,
+            CLAW_GEOMETRY.hingeY - CLAW_GEOMETRY.bracketTop.y,
+          );
+          const bracketTilt = -Math.atan2(
+            CLAW_GEOMETRY.hingeRadius - CLAW_GEOMETRY.bracketTop.r,
+            CLAW_GEOMETRY.bracketTop.y - CLAW_GEOMETRY.hingeY,
+          );
           return (
             <group
               key={index}
-              position={[
-                Math.cos(theta) * CLAW_GEOMETRY.hingeRadius,
-                CLAW_GEOMETRY.hingeY,
-                Math.sin(theta) * CLAW_GEOMETRY.hingeRadius,
-              ]}
               rotation={[0, -theta, 0]}
             >
-              <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.085, 0.085, 0.13, 16]} />
+              {[-0.055, 0.055].map((z) => (
+                <mesh
+                  key={z}
+                  castShadow
+                  position={[
+                    (CLAW_GEOMETRY.bracketTop.r + CLAW_GEOMETRY.hingeRadius) / 2,
+                    (CLAW_GEOMETRY.bracketTop.y + CLAW_GEOMETRY.hingeY) / 2,
+                    z,
+                  ]}
+                  rotation={[0, 0, bracketTilt]}
+                >
+                  <boxGeometry args={[0.066, bracketLength, 0.026]} />
+                  <meshStandardMaterial
+                    color="#aeb2af"
+                    metalness={0.93}
+                    roughness={0.22}
+                  />
+                </mesh>
+              ))}
+              <mesh
+                castShadow
+                position={[
+                  CLAW_GEOMETRY.bracketTop.r,
+                  CLAW_GEOMETRY.bracketTop.y,
+                  0,
+                ]}
+                rotation={[Math.PI / 2, 0, 0]}
+              >
+                <cylinderGeometry args={[0.052, 0.052, 0.14, 16]} />
                 <meshStandardMaterial
-                  color="#d8b66b"
-                  metalness={0.86}
+                  color="#747975"
+                  metalness={0.92}
+                  roughness={0.24}
+                />
+              </mesh>
+              <mesh
+                castShadow
+                position={[
+                  CLAW_GEOMETRY.hingeRadius,
+                  CLAW_GEOMETRY.hingeY,
+                  0,
+                ]}
+                rotation={[Math.PI / 2, 0, 0]}
+              >
+                <cylinderGeometry args={[0.062, 0.062, 0.145, 18]} />
+                <meshStandardMaterial
+                  color="#777c78"
+                  metalness={0.94}
                   roughness={0.22}
                 />
               </mesh>
-              <mesh position={[0, 0, 0.073]} rotation={[Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.026, 0.026, 0.02, 12]} />
+              {[-0.083, 0.083].map((z) => (
+                <mesh
+                  key={z}
+                  castShadow
+                  position={[
+                    CLAW_GEOMETRY.hingeRadius,
+                    CLAW_GEOMETRY.hingeY,
+                    z,
+                  ]}
+                  rotation={[Math.PI / 2, 0, 0]}
+                >
+                  <cylinderGeometry args={[0.072, 0.072, 0.018, 18]} />
+                  <meshStandardMaterial
+                    color="#c9ccca"
+                    metalness={0.96}
+                    roughness={0.16}
+                  />
+                </mesh>
+              ))}
+              <mesh
+                position={[
+                  CLAW_GEOMETRY.hingeRadius,
+                  CLAW_GEOMETRY.hingeY,
+                  0.094,
+                ]}
+                rotation={[Math.PI / 2, 0, 0]}
+              >
+                <cylinderGeometry args={[0.027, 0.027, 0.02, 12]} />
                 <meshStandardMaterial
-                  color="#242622"
-                  metalness={0.7}
-                  roughness={0.3}
+                  color="#4f5450"
+                  metalness={0.86}
+                  roughness={0.28}
                 />
               </mesh>
             </group>
@@ -940,16 +1230,16 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       ))}
 
       <mesh ref={connectorRefOne} castShadow>
-        <cylinderGeometry args={[0.027, 0.027, 1, 10]} />
-        <meshStandardMaterial color="#d9b86f" metalness={0.9} roughness={0.18} />
+        <boxGeometry args={[0.052, 1, 0.022]} />
+        <meshStandardMaterial color="#aeb3b0" metalness={0.94} roughness={0.2} />
       </mesh>
       <mesh ref={connectorRefTwo} castShadow>
-        <cylinderGeometry args={[0.027, 0.027, 1, 10]} />
-        <meshStandardMaterial color="#d9b86f" metalness={0.9} roughness={0.18} />
+        <boxGeometry args={[0.052, 1, 0.022]} />
+        <meshStandardMaterial color="#aeb3b0" metalness={0.94} roughness={0.2} />
       </mesh>
       <mesh ref={connectorRefThree} castShadow>
-        <cylinderGeometry args={[0.027, 0.027, 1, 10]} />
-        <meshStandardMaterial color="#d9b86f" metalness={0.9} roughness={0.18} />
+        <boxGeometry args={[0.052, 1, 0.022]} />
+        <meshStandardMaterial color="#aeb3b0" metalness={0.94} roughness={0.2} />
       </mesh>
     </>
   );

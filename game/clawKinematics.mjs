@@ -1,24 +1,29 @@
 const DEG = Math.PI / 180;
 
 export const CLAW_GEOMETRY = Object.freeze({
-  hingeRadius: 0.27,
-  hingeY: -0.16,
+  hingeRadius: 0.31,
+  hingeY: -0.32,
   jointsPerFinger: 1,
   curvePoints: Object.freeze([
     Object.freeze({ r: 0, y: 0 }),
-    Object.freeze({ r: -0.03, y: -0.23 }),
-    Object.freeze({ r: -0.16, y: -0.52 }),
+    Object.freeze({ r: 0.01, y: -0.12 }),
+    Object.freeze({ r: -0.02, y: -0.28 }),
+    Object.freeze({ r: -0.1, y: -0.48 }),
+    Object.freeze({ r: -0.23, y: -0.67 }),
     Object.freeze({ r: -0.37, y: -0.78 }),
   ]),
-  tineRadius: 0.05,
-  scoopRadius: 0.07,
+  fingerWidth: 0.082,
+  fingerThickness: 0.032,
+  tineRadius: 0.038,
+  scoopRadius: 0.065,
   openAngle: 50 * DEG,
-  closedAngle: 14 * DEG,
-  minimumAngle: 12 * DEG,
+  closedAngle: 12 * DEG,
+  minimumAngle: 10 * DEG,
   maximumAngle: 54 * DEG,
-  connectorRadius: 0.1,
-  connectorLength: 0.42,
-  connectorPoint: Object.freeze({ r: -0.03, y: -0.23 }),
+  connectorRadius: 0.12,
+  connectorLength: 0.3,
+  connectorPoint: Object.freeze({ r: -0.1, y: -0.2 }),
+  bracketTop: Object.freeze({ r: 0.23, y: 0.12 }),
 });
 
 export function clampClosure(value) {

@@ -1,8 +1,39 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { ContactShadows, OrbitControls } from "@react-three/drei";
+import {
+  ContactShadows,
+  Environment,
+  Lightformer,
+  OrbitControls,
+} from "@react-three/drei";
 import SceneContent from "./MachineScene";
+
+function StudioEnvironment() {
+  return (
+    <Environment resolution={128}>
+      <Lightformer
+        form="rect"
+        intensity={3.4}
+        position={[0, 5, -6]}
+        scale={[8, 4, 1]}
+      />
+      <Lightformer
+        form="rect"
+        intensity={2.2}
+        position={[-5, 2, 1]}
+        rotation={[0, Math.PI / 2, 0]}
+        scale={[5, 3, 1]}
+      />
+      <Lightformer
+        form="ring"
+        intensity={2.8}
+        position={[4, 4, 4]}
+        scale={2.5}
+      />
+    </Environment>
+  );
+}
 
 export default function GameCanvas() {
   return (
@@ -26,6 +57,7 @@ export default function GameCanvas() {
         rotateSpeed={0.62}
         zoomSpeed={0.72}
       />
+      <StudioEnvironment />
       <SceneContent />
       <ContactShadows
         position={[0, -0.25, 0]}
