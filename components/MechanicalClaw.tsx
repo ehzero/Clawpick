@@ -32,6 +32,19 @@ import {
 } from "@/game/cableDynamics.mjs";
 import { useGameStore } from "@/game/store";
 
+const hotModule = (
+  import.meta as ImportMeta & {
+    hot?: { dispose: (callback: () => void) => void };
+  }
+).hot;
+
+if (hotModule) {
+  hotModule.dispose(() => {
+    // Closed-chain joints must be rebuilt together with all connected bodies.
+    useGameStore.getState().reset();
+  });
+}
+
 export const TROLLEY_Y = 4.02;
 export const CHUTE_X = 2.28;
 export const CHUTE_Z = 1.18;

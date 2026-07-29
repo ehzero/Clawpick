@@ -120,3 +120,13 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   assert.match(source, /JointData\.rope\(\s*cableLength\.current/);
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);
 });
+
+test("hot reload rebuilds the complete closed-chain physics world", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /hotModule\.dispose/);
+  assert.match(source, /useGameStore\.getState\(\)\.reset\(\)/);
+});
