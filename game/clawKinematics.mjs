@@ -43,13 +43,16 @@ export function smoothClosure(value) {
  * Solves the shared plunger, rocker link, and rigid finger in a radial plane.
  * `r` points out from the claw centre and `y` points upward.
  */
-export function getClawPose(closure) {
+export function getClawPoseFromPlungerY(inputPlungerY) {
   const geometry = CLAW_GEOMETRY;
-  const t = smoothClosure(closure);
+  const plungerY = Math.min(
+    geometry.closedPlungerY,
+    Math.max(geometry.openPlungerY, inputPlungerY),
+  );
+  const stroke =
+    (plungerY - geometry.openPlungerY) /
+    (geometry.closedPlungerY - geometry.openPlungerY);
   const housingPivot = geometry.housingPivot;
-  const plungerY =
-    geometry.openPlungerY +
-    (geometry.closedPlungerY - geometry.openPlungerY) * t;
   const plungerPin = { r: geometry.plungerRadius, y: plungerY };
   const deltaR = plungerPin.r - housingPivot.r;
   const deltaY = plungerPin.y - housingPivot.y;
@@ -101,7 +104,8 @@ export function getClawPose(closure) {
   );
 
   return {
-    closure: t,
+    closure: stroke,
+    stroke,
     angle,
     rockerAngle,
     housingPivot,
@@ -113,10 +117,24 @@ export function getClawPose(closure) {
   };
 }
 
+export function getClawPose(closure) {
+  const geometry = CLAW_GEOMETRY;
+  const stroke = smoothClosure(closure);
+  const plungerY =
+    geometry.openPlungerY +
+    (geometry.closedPlungerY - geometry.openPlungerY) * stroke;
+  return getClawPoseFromPlungerY(plungerY);
+}
+
 export function sampleClawClearance(samples = 101) {
   let minimum = Number.POSITIVE_INFINITY;
   for (let index = 0; index < samples; index += 1) {
-    const pose = getClawPose(index / Math.max(1, samples - 1));
+    const stroke = index / Math.max(1, samples - 1);
+    const plungerY =
+      CLAW_GEOMETRY.openPlungerY +
+      (CLAW_GEOMETRY.closedPlungerY - CLAW_GEOMETRY.openPlungerY) *
+        stroke;
+    const pose = getClawPoseFromPlungerY(plungerY);
     const clearance =
       pose.tipSeparation - CLAW_GEOMETRY.scoopRadius * 2;
     minimum = Math.min(minimum, clearance);

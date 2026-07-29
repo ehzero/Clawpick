@@ -11,6 +11,7 @@ import { useFrame } from "@react-three/fiber";
 import {
   BallCollider,
   CapsuleCollider,
+  CuboidCollider,
   CylinderCollider,
   RigidBody,
   interactionGroups,
@@ -21,7 +22,7 @@ import type { RopeImpulseJoint } from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
 import {
   CLAW_GEOMETRY,
-  getClawPose,
+  getClawPoseFromPlungerY,
   sampleClawClearance,
 } from "@/game/clawKinematics.mjs";
 import {
@@ -38,6 +39,8 @@ const CABLE_ANCHOR_Y = TROLLEY_Y - 0.18;
 const MIN_CABLE_LENGTH = 0.04;
 const MAX_CABLE_LENGTH = 1.8;
 const CLAW_ATTACHMENT_Y = 0.48;
+const PLUNGER_STROKE =
+  CLAW_GEOMETRY.closedPlungerY - CLAW_GEOMETRY.openPlungerY;
 const CLAW_START_Y =
   CABLE_ANCHOR_Y - MIN_CABLE_LENGTH - CLAW_ATTACHMENT_Y;
 const CLAW_LIMIT_X = 2.32;
@@ -51,6 +54,8 @@ const BODY_INITIAL_POSITION: [number, number, number] = [
 ];
 const HOUSING_COLLISION_GROUPS = interactionGroups([1], [0]);
 const FINGER_COLLISION_GROUPS = interactionGroups([2], [0, 2]);
+const LINKAGE_COLLISION_GROUPS = interactionGroups([3], [0]);
+const FINGER_COLLIDER_SEGMENTS = 12;
 const UMBILICAL_SEGMENTS = 48;
 const HOUSING_COLLARS = [
   { y: 0.4, radius: 0.18, height: 0.022 },
@@ -76,10 +81,12 @@ interface ClawFingerColliderProps {
 interface ClawLinkageDriverProps {
   housingRef: RefObject<RapierRigidBody | null>;
   plungerRef: RefObject<THREE.Group | null>;
+  plungerColliderRef: RefObject<RapierRigidBody | null>;
   rockerRefs: ReadonlyArray<RefObject<THREE.Group | null>>;
+  rockerColliderRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
   fingerVisualRefs: ReadonlyArray<RefObject<THREE.Group | null>>;
   fingerColliderRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
-  closure: MutableRefObject<number>;
+  plungerY: MutableRefObject<number>;
 }
 
 interface SegmentTransform {
@@ -149,7 +156,7 @@ function plateBetween(
   };
 }
 
-function createFingerStripGeometry(index: number) {
+function createFingerLinkagePath(index: number) {
   const theta = thetaForIndex(index);
   const radial = new THREE.Vector3(Math.cos(theta), 0, Math.sin(theta));
   const hingeAxis = new THREE.Vector3(-Math.sin(theta), 0, Math.cos(theta));
@@ -166,6 +173,32 @@ function createFingerStripGeometry(index: number) {
     false,
     "centripetal",
   );
+  const plungerDirection = new THREE.Vector3(
+    radial.x * CLAW_GEOMETRY.fingerPlungerDirection.r,
+    CLAW_GEOMETRY.fingerPlungerDirection.y,
+    radial.z * CLAW_GEOMETRY.fingerPlungerDirection.r,
+  ).normalize();
+  const plungerArmEnd = plungerDirection
+    .clone()
+    .multiplyScalar(CLAW_GEOMETRY.fingerPlungerLength);
+  const plungerArm = plateBetween(
+    new THREE.Vector3(),
+    plungerArmEnd,
+    hingeAxis,
+  );
+
+  return {
+    curve,
+    plungerArm,
+    plungerArmEnd: plungerArmEnd.toArray() as [number, number, number],
+  };
+}
+
+function createFingerStripGeometry(index: number) {
+  const theta = thetaForIndex(index);
+  const hingeAxis = new THREE.Vector3(-Math.sin(theta), 0, Math.cos(theta));
+  const linkage = createFingerLinkagePath(index);
+  const { curve } = linkage;
   const samples = 24;
   const positions: number[] = [];
   const indices: number[] = [];
@@ -226,25 +259,11 @@ function createFingerStripGeometry(index: number) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const plungerDirection = new THREE.Vector3(
-    radial.x * CLAW_GEOMETRY.fingerPlungerDirection.r,
-    CLAW_GEOMETRY.fingerPlungerDirection.y,
-    radial.z * CLAW_GEOMETRY.fingerPlungerDirection.r,
-  ).normalize();
-  const plungerArmEnd = plungerDirection
-    .clone()
-    .multiplyScalar(CLAW_GEOMETRY.fingerPlungerLength);
-  const plungerArm = plateBetween(
-    new THREE.Vector3(),
-    plungerArmEnd,
-    hingeAxis,
-  );
-
   return {
     curve,
     geometry,
-    plungerArm,
-    plungerArmEnd: plungerArmEnd.toArray() as [number, number, number],
+    plungerArm: linkage.plungerArm,
+    plungerArmEnd: linkage.plungerArmEnd,
   };
 }
 
@@ -283,23 +302,61 @@ function setInstanceBetween(
   mesh.setMatrixAt(index, matrix);
 }
 
+function createRockerLinkShape(index: number) {
+  const openPose = getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY);
+  const housingPivot = radialPoint(
+    index,
+    CLAW_GEOMETRY.housingPivot.r,
+    CLAW_GEOMETRY.housingPivot.y,
+  );
+  const openHinge = radialPoint(
+    index,
+    openPose.hinge.r,
+    openPose.hinge.y,
+  );
+  const rockerEnd = openHinge.clone().sub(housingPivot);
+  const hingeAxis = new THREE.Vector3(...radialAxis(index));
+  const pinQuaternion = new THREE.Quaternion().setFromUnitVectors(
+    Y_AXIS,
+    hingeAxis,
+  );
+
+  return {
+    housingPivot: housingPivot.toArray() as [number, number, number],
+    rockerLink: plateBetween(
+      new THREE.Vector3(),
+      rockerEnd,
+      hingeAxis,
+    ),
+    rockerEnd: rockerEnd.toArray() as [number, number, number],
+    pinQuaternion:
+      pinQuaternion.toArray() as [number, number, number, number],
+  };
+}
+
 function ClawLinkageDriver({
   housingRef,
   plungerRef,
+  plungerColliderRef,
   rockerRefs,
+  rockerColliderRefs,
   fingerVisualRefs,
   fingerColliderRefs,
-  closure,
+  plungerY,
 }: ClawLinkageDriverProps) {
-  // Shared closed-loop joints over-constrain Rapier, so the body-mounted rocker
-  // and visible mechanism stay local while only contact colliders follow it.
-  const openPose = useMemo(() => getClawPose(0), []);
+  // Shared closed-loop joints over-constrain Rapier. Solve the linkage from the
+  // plunger stroke, keep visuals local, and move every contact body to that pose.
+  const openPose = useMemo(
+    () => getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY),
+    [],
+  );
   useFrame(() => {
     const housing = housingRef.current;
     const plunger = plungerRef.current;
-    if (!housing || !plunger) return;
+    const plungerCollider = plungerColliderRef.current;
+    if (!housing || !plunger || !plungerCollider) return;
 
-    const pose = getClawPose(closure.current);
+    const pose = getClawPoseFromPlungerY(plungerY.current);
     const housingTranslation = housing.translation();
     const housingPosition = new THREE.Vector3(
       housingTranslation.x,
@@ -317,9 +374,14 @@ function ClawLinkageDriver({
       localPosition.applyQuaternion(housingQuaternion).add(housingPosition);
 
     plunger.position.set(0, pose.plungerY, 0);
+    plungerCollider.setNextKinematicTranslation(
+      toWorldPosition(new THREE.Vector3(0, pose.plungerY, 0)),
+    );
+    plungerCollider.setNextKinematicRotation(housingQuaternion);
 
     for (let index = 0; index < FINGER_COUNT; index += 1) {
       const rocker = rockerRefs[index].current;
+      const rockerCollider = rockerColliderRefs[index].current;
       const fingerVisual = fingerVisualRefs[index].current;
       const fingerCollider = fingerColliderRefs[index].current;
 
@@ -339,6 +401,20 @@ function ClawLinkageDriver({
       );
 
       rocker?.quaternion.copy(rockerLocalRotation);
+      if (rockerCollider) {
+        rockerCollider.setNextKinematicTranslation(
+          toWorldPosition(
+            radialPoint(
+              index,
+              pose.housingPivot.r,
+              pose.housingPivot.y,
+            ),
+          ),
+        );
+        rockerCollider.setNextKinematicRotation(
+          housingQuaternion.clone().multiply(rockerLocalRotation),
+        );
+      }
       if (fingerVisual) {
         fingerVisual.position.copy(fingerLocalPosition);
         fingerVisual.quaternion.copy(fingerLocalRotation);
@@ -364,37 +440,7 @@ function RockerLink({
   index: number;
   rockerRef: RefObject<THREE.Group | null>;
 }) {
-  const shape = useMemo(() => {
-    const openPose = getClawPose(0);
-    const housingPivot = radialPoint(
-      index,
-      CLAW_GEOMETRY.housingPivot.r,
-      CLAW_GEOMETRY.housingPivot.y,
-    );
-    const openHinge = radialPoint(
-      index,
-      openPose.hinge.r,
-      openPose.hinge.y,
-    );
-    const rockerEnd = openHinge.clone().sub(housingPivot);
-    const hingeAxis = new THREE.Vector3(...radialAxis(index));
-    const pinQuaternion = new THREE.Quaternion().setFromUnitVectors(
-      Y_AXIS,
-      hingeAxis,
-    );
-
-    return {
-      housingPivot: housingPivot.toArray() as [number, number, number],
-      rockerLink: plateBetween(
-        new THREE.Vector3(),
-        rockerEnd,
-        hingeAxis,
-      ),
-      rockerEnd: rockerEnd.toArray() as [number, number, number],
-      pinQuaternion:
-        pinQuaternion.toArray() as [number, number, number, number],
-    };
-  }, [index]);
+  const shape = useMemo(() => createRockerLinkShape(index), [index]);
 
   return (
     <group ref={rockerRef} position={shape.housingPivot}>
@@ -443,7 +489,7 @@ function ClawFingerVisual({
         ),
     );
     const strip = createFingerStripGeometry(index);
-    const openPose = getClawPose(0);
+    const openPose = getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY);
     const hingeAxis = new THREE.Vector3(...radialAxis(index));
     const pinQuaternion = new THREE.Quaternion().setFromUnitVectors(
       Y_AXIS,
@@ -469,7 +515,7 @@ function ClawFingerVisual({
       tip: points.at(-1)!.toArray() as [number, number, number],
     };
   }, [geometry, index]);
-  const openPose = getClawPose(0);
+  const openPose = getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY);
   const hinge = radialPoint(index, openPose.hinge.r, openPose.hinge.y);
 
   return (
@@ -564,25 +610,19 @@ function ClawFingerCollider({
     (state) => state.settings.clawFriction,
   );
   const shape = useMemo(() => {
-    const theta = thetaForIndex(index);
-    const radial = new THREE.Vector3(Math.cos(theta), 0, Math.sin(theta));
-    const points = geometry.curvePoints.map(
-      (point) =>
-        new THREE.Vector3(
-          radial.x * point.r,
-          point.y,
-          radial.z * point.r,
-        ),
-    );
+    const linkage = createFingerLinkagePath(index);
+    const points = linkage.curve.getPoints(FINGER_COLLIDER_SEGMENTS);
 
     return {
       segments: points.slice(0, -1).map((point, segmentIndex) =>
         between(point, points[segmentIndex + 1]),
       ),
       tip: points.at(-1)!.toArray() as [number, number, number],
+      plungerArm: linkage.plungerArm,
+      plungerArmEnd: linkage.plungerArmEnd,
     };
-  }, [geometry, index]);
-  const openPose = getClawPose(0);
+  }, [index]);
+  const openPose = getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY);
   const hinge = radialPoint(index, openPose.hinge.r, openPose.hinge.y);
   const openFingerQuaternion = new THREE.Quaternion().setFromAxisAngle(
     new THREE.Vector3(...radialAxis(index)),
@@ -621,6 +661,27 @@ function ClawFingerCollider({
           collisionGroups={FINGER_COLLISION_GROUPS}
         />
       ))}
+      <CuboidCollider
+        args={[
+          geometry.fingerWidth * 0.45,
+          shape.plungerArm.length / 2,
+          geometry.fingerThickness / 2,
+        ]}
+        position={shape.plungerArm.position}
+        quaternion={shape.plungerArm.quaternion}
+        friction={clawFriction}
+        restitution={0.01}
+        mass={0.05}
+        collisionGroups={FINGER_COLLISION_GROUPS}
+      />
+      <BallCollider
+        args={[geometry.fingerWidth * 0.66]}
+        position={shape.plungerArmEnd}
+        friction={clawFriction}
+        restitution={0.01}
+        mass={0.03}
+        collisionGroups={FINGER_COLLISION_GROUPS}
+      />
       <BallCollider
         args={[geometry.scoopRadius]}
         position={shape.tip}
@@ -628,6 +689,103 @@ function ClawFingerCollider({
         restitution={0}
         mass={0.04}
         collisionGroups={FINGER_COLLISION_GROUPS}
+      />
+    </RigidBody>
+  );
+}
+
+function PlungerCollider({
+  plungerRef,
+}: {
+  plungerRef: RefObject<RapierRigidBody | null>;
+}) {
+  const clawFriction = useGameStore(
+    (state) => state.settings.clawFriction,
+  );
+
+  return (
+    <RigidBody
+      ref={plungerRef}
+      type="kinematicPosition"
+      colliders={false}
+      position={[
+        BODY_INITIAL_POSITION[0],
+        BODY_INITIAL_POSITION[1] + CLAW_GEOMETRY.openPlungerY,
+        BODY_INITIAL_POSITION[2],
+      ]}
+      ccd
+      name="claw-plunger-collider"
+    >
+      <CylinderCollider
+        args={[0.28, 0.052]}
+        position={[0, 0.27, 0]}
+        friction={clawFriction}
+        collisionGroups={LINKAGE_COLLISION_GROUPS}
+      />
+      <CylinderCollider
+        args={[0.0325, 0.13]}
+        friction={clawFriction}
+        collisionGroups={LINKAGE_COLLISION_GROUPS}
+      />
+      {Array.from({ length: FINGER_COUNT }, (_, index) => {
+        const theta = thetaForIndex(index);
+        return (
+          <group key={index} rotation={[0, -theta, 0]}>
+            <CuboidCollider
+              args={[0.065, 0.0225, 0.0275]}
+              position={[0.065, 0, 0]}
+              friction={clawFriction}
+              collisionGroups={LINKAGE_COLLISION_GROUPS}
+            />
+            <BallCollider
+              args={[0.024]}
+              position={[CLAW_GEOMETRY.plungerRadius, 0, 0]}
+              friction={clawFriction}
+              collisionGroups={LINKAGE_COLLISION_GROUPS}
+            />
+          </group>
+        );
+      })}
+    </RigidBody>
+  );
+}
+
+function RockerLinkCollider({
+  index,
+  rockerRef,
+}: {
+  index: number;
+  rockerRef: RefObject<RapierRigidBody | null>;
+}) {
+  const shape = useMemo(() => createRockerLinkShape(index), [index]);
+
+  return (
+    <RigidBody
+      ref={rockerRef}
+      type="kinematicPosition"
+      colliders={false}
+      position={[
+        BODY_INITIAL_POSITION[0] + shape.housingPivot[0],
+        BODY_INITIAL_POSITION[1] + shape.housingPivot[1],
+        BODY_INITIAL_POSITION[2] + shape.housingPivot[2],
+      ]}
+      ccd
+      name={`claw-rocker-collider-${index + 1}`}
+    >
+      <CuboidCollider
+        args={[0.039, shape.rockerLink.length / 2, 0.014]}
+        position={shape.rockerLink.position}
+        quaternion={shape.rockerLink.quaternion}
+        collisionGroups={LINKAGE_COLLISION_GROUPS}
+      />
+      <BallCollider
+        args={[0.052]}
+        collisionGroups={LINKAGE_COLLISION_GROUPS}
+      />
+      <BallCollider
+        args={[0.058]}
+        position={shape.rockerEnd}
+        collisionGroups={LINKAGE_COLLISION_GROUPS}
       />
     </RigidBody>
   );
@@ -821,6 +979,12 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const { world, rapier } = useRapier();
   const anchorRef = useRef<RapierRigidBody>(null);
   const housingRef = useRef<RapierRigidBody>(null);
+  const plungerColliderRef = useRef<RapierRigidBody>(null);
+  const rockerColliderRefs = [
+    useRef<RapierRigidBody>(null),
+    useRef<RapierRigidBody>(null),
+    useRef<RapierRigidBody>(null),
+  ];
   const fingerColliderRefs = [
     useRef<RapierRigidBody>(null),
     useRef<RapierRigidBody>(null),
@@ -842,7 +1006,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const drumRef = useRef<THREE.Mesh>(null);
   const plungerRef = useRef<THREE.Group>(null);
   const umbilicalRef = useRef<THREE.InstancedMesh>(null);
-  const closure = useRef(0);
+  const plungerY = useRef<number>(CLAW_GEOMETRY.openPlungerY);
   const cableLength = useRef(MIN_CABLE_LENGTH);
   const trolleyPosition = useRef({ x: 0, z: 0 });
   const trolleyVelocity = useRef({ x: 0, z: 0 });
@@ -963,13 +1127,18 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     }
 
     if (phase === "closing") {
-      closure.current = Math.min(
-        1,
-        closure.current + settings.closeSpeed * delta,
+      plungerY.current = Math.min(
+        CLAW_GEOMETRY.closedPlungerY,
+        plungerY.current +
+          PLUNGER_STROKE * settings.closeSpeed * delta,
       );
-      if (closure.current >= 0.995) {
+      if (
+        plungerY.current >=
+        CLAW_GEOMETRY.closedPlungerY - PLUNGER_STROKE * 0.005
+      ) {
         state.record("grip_attempt", {
           contactModel: "collider-only",
+          actuator: "plunger-stroke",
           strength: settings.clawStrength,
         });
         state.setPhase("lifting");
@@ -997,8 +1166,16 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     }
 
     if (phase === "releasing") {
-      closure.current = Math.max(0, closure.current - 2.1 * delta);
-      if (closure.current <= 0.001) state.setPhase("settling");
+      plungerY.current = Math.max(
+        CLAW_GEOMETRY.openPlungerY,
+        plungerY.current - PLUNGER_STROKE * 2.1 * delta,
+      );
+      if (
+        plungerY.current <=
+        CLAW_GEOMETRY.openPlungerY + PLUNGER_STROKE * 0.001
+      ) {
+        state.setPhase("settling");
+      }
     }
 
     if (phase === "settling" && phaseElapsed.current > 3.1) {
@@ -1152,7 +1329,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         minFps: Math.round(Math.min(minFps.current, fps)),
         physicsMs: Number((performance.now() - started).toFixed(2)),
         activeBodies:
-          Object.values(bodies.current).filter(Boolean).length + 5,
+          Object.values(bodies.current).filter(Boolean).length + 9,
         cableError: Number((cableState.overrun * 1000).toFixed(1)),
         cableLength: Number(cableLength.current.toFixed(2)),
         cableDistance: Number(cableState.distance.toFixed(2)),
@@ -1372,12 +1549,22 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       <ClawLinkageDriver
         housingRef={housingRef}
         plungerRef={plungerRef}
+        plungerColliderRef={plungerColliderRef}
         rockerRefs={rockerRefs}
+        rockerColliderRefs={rockerColliderRefs}
         fingerVisualRefs={fingerVisualRefs}
         fingerColliderRefs={fingerColliderRefs}
-        closure={closure}
+        plungerY={plungerY}
       />
 
+      <PlungerCollider plungerRef={plungerColliderRef} />
+      {Array.from({ length: FINGER_COUNT }, (_, index) => (
+        <RockerLinkCollider
+          key={index}
+          index={index}
+          rockerRef={rockerColliderRefs[index]}
+        />
+      ))}
       {Array.from({ length: FINGER_COUNT }, (_, index) => (
         <ClawFingerCollider
           key={index}

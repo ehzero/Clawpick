@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CLAW_GEOMETRY,
   getClawPose,
+  getClawPoseFromPlungerY,
   sampleClawClearance,
 } from "../game/clawKinematics.mjs";
 
@@ -19,7 +20,12 @@ test("each curved finger stays rigid while its two linkage pivots move", () => {
   );
 
   for (let index = 0; index <= 100; index += 1) {
-    const pose = getClawPose(index / 100);
+    const plungerY =
+      CLAW_GEOMETRY.openPlungerY +
+      (CLAW_GEOMETRY.closedPlungerY - CLAW_GEOMETRY.openPlungerY) *
+        (index / 100);
+    const pose = getClawPoseFromPlungerY(plungerY);
+    assert.ok(Math.abs(pose.plungerY - plungerY) < 1e-9);
     assert.ok(pose.angle >= CLAW_GEOMETRY.minimumAngle);
     assert.ok(pose.angle <= CLAW_GEOMETRY.maximumAngle);
     assert.ok(
@@ -62,8 +68,8 @@ test("each curved finger stays rigid while its two linkage pivots move", () => {
 });
 
 test("the rising plunger swings the moving finger hinge away from the body", () => {
-  const open = getClawPose(0);
-  const closed = getClawPose(1);
+  const open = getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY);
+  const closed = getClawPoseFromPlungerY(CLAW_GEOMETRY.closedPlungerY);
 
   assert.ok(closed.plungerY > open.plungerY);
   assert.ok(
@@ -75,6 +81,24 @@ test("the rising plunger swings the moving finger hinge away from the body", () 
     "the moving hinge should swing outward as the plunger rises",
   );
   assert.notEqual(closed.rockerAngle, open.rockerAngle);
+});
+
+test("plunger displacement is the sole input to the linkage solver", () => {
+  const quarterStroke =
+    CLAW_GEOMETRY.openPlungerY +
+    (CLAW_GEOMETRY.closedPlungerY - CLAW_GEOMETRY.openPlungerY) * 0.25;
+  const pose = getClawPoseFromPlungerY(quarterStroke);
+
+  assert.ok(Math.abs(pose.stroke - 0.25) < 1e-9);
+  assert.ok(Math.abs(pose.plungerY - quarterStroke) < 1e-9);
+  assert.deepEqual(
+    getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY - 1),
+    getClawPoseFromPlungerY(CLAW_GEOMETRY.openPlungerY),
+  );
+  assert.deepEqual(
+    getClawPoseFromPlungerY(CLAW_GEOMETRY.closedPlungerY + 1),
+    getClawPoseFromPlungerY(CLAW_GEOMETRY.closedPlungerY),
+  );
 });
 
 test("three scoops retain physical clearance throughout closure", () => {
@@ -124,19 +148,29 @@ test("the complete linkage follows the suspended housing pose", async () => {
   );
 
   assert.match(source, /function ClawLinkageDriver/);
-  assert.equal(source.match(/type="kinematicPosition"/g)?.length, 2);
+  assert.match(source, /const plungerY = useRef<number>/);
+  assert.doesNotMatch(source, /closure\.current/);
+  assert.match(source, /getClawPoseFromPlungerY\(plungerY\.current\)/);
   assert.match(source, /setNextKinematicTranslation/);
   assert.match(source, /setNextKinematicRotation/);
   assert.match(source, /function RockerLink/);
+  assert.match(source, /function RockerLinkCollider/);
   assert.match(source, /function PlungerVisual/);
+  assert.match(source, /function PlungerCollider/);
   assert.match(source, /function ClawFingerVisual/);
   assert.match(source, /function ClawFingerCollider/);
+  assert.match(source, /const FINGER_COLLIDER_SEGMENTS = 12/);
+  assert.match(source, /linkage\.curve\.getPoints\(FINGER_COLLIDER_SEGMENTS\)/);
+  assert.match(source, /name="claw-plunger-collider"/);
+  assert.match(source, /name=\{`claw-rocker-collider-\$\{index \+ 1\}`\}/);
   assert.match(
     source,
     /<group ref=\{rockerRef\} position=\{shape\.housingPivot\}>/,
   );
   assert.match(source, /rocker\?\.quaternion\.copy\(rockerLocalRotation\)/);
   assert.match(source, /plunger\.position\.set\(0, pose\.plungerY, 0\)/);
+  assert.match(source, /plungerCollider\.setNextKinematicTranslation/);
+  assert.match(source, /rockerCollider\.setNextKinematicRotation/);
   assert.match(source, /fingerVisual\.position\.copy\(fingerLocalPosition\)/);
   assert.match(
     source,
