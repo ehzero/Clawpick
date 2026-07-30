@@ -226,7 +226,7 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   );
   assert.match(source, /claw-central-plunger/);
   assert.doesNotMatch(source, /proximalLength|distalLength|bendAngle|shape\.knee/);
-  assert.match(source, /JointData\.rope\(\s*cableLength\.current/);
+  assert.match(source, /JointData\.rope\(\s*cableLength[,\s]/);
   assert.doesNotMatch(source, /applyImpulse|cableStiffness|cableDamping/);
 });
 
@@ -250,9 +250,10 @@ test("the complete linkage is a force-driven dynamic closed loop", async () => {
   );
   assert.doesNotMatch(source, /configureMotor/);
   assert.doesNotMatch(source, /MotorModel/);
+  // The commanded stroke is still measured from the open end stop.
   assert.match(
     source,
-    /targetPlungerY\.current - CLAW_GEOMETRY\.openPlungerY/,
+    /plungerY\.current - CLAW_GEOMETRY\.openPlungerY/,
   );
   assert.match(source, /function RockerLink/);
   assert.match(source, /function RockerLinkCollider/);

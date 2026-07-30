@@ -13,6 +13,7 @@ import {
   CylinderCollider,
   RigidBody,
   interactionGroups,
+  useAfterPhysicsStep,
   useBeforePhysicsStep,
   usePrismaticJoint,
   useRapier,
@@ -50,7 +51,14 @@ import {
   stepUmbilicalState,
   updateDynamicTubeGeometry,
 } from "@/game/umbilicalDynamics.mjs";
-import { PRIZE_DECK_FLOOR_Y } from "@/game/machineDimensions.mjs";
+import {
+  PHYSICS_TIME_STEP,
+  PRIZE_DECK_FLOOR_Y,
+} from "@/game/machineDimensions.mjs";
+import {
+  createMachineState,
+  stepMachine,
+} from "@/game/machineStep.mjs";
 import { useGameStore } from "@/game/store";
 import type { ClawPartSpecs } from "@/game/types";
 
@@ -222,11 +230,6 @@ interface SegmentTransform {
   widthScale?: number;
 }
 
-function approach(current: number, target: number, amount: number) {
-  if (current < target) return Math.min(target, current + amount);
-  return Math.max(target, current - amount);
-}
-
 function measurePlungerMotion(
   housing: RapierRigidBody,
   plunger: RapierRigidBody,
@@ -263,20 +266,6 @@ function measurePlungerMotion(
   ).dot(axis);
 
   return { axis, stroke, velocity };
-}
-
-function isPlungerSettled(
-  motion: { stroke: number; velocity: number } | null,
-  targetY: number,
-  positionTolerance: number,
-  velocityTolerance: number,
-) {
-  if (!motion) return false;
-  const targetStroke = targetY - CLAW_GEOMETRY.openPlungerY;
-  return (
-    Math.abs(targetStroke - motion.stroke) <= positionTolerance &&
-    Math.abs(motion.velocity) <= velocityTolerance
-  );
 }
 
 function radialPoint(index: number, radius: number, y: number) {
@@ -968,20 +957,22 @@ function FingerClosedLoopJoints({
   return null;
 }
 
+/**
+ * Wires the closed kinematic loop: a prismatic plunger plus three
+ * housing→rocker→finger→plunger revolute chains. The actuator force that
+ * drives this loop is applied by the parent, which owns the single ordered
+ * physics-write step.
+ */
 function ClawClosedLinkage({
   housingRef,
   plungerRef,
   rockerRefs,
   fingerRefs,
-  targetPlungerY,
-  actuatorForceRef,
 }: {
   housingRef: RefObject<RapierRigidBody | null>;
   plungerRef: RefObject<RapierRigidBody | null>;
   rockerRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
   fingerRefs: ReadonlyArray<RefObject<RapierRigidBody | null>>;
-  targetPlungerY: MutableRefObject<number>;
-  actuatorForceRef: MutableRefObject<number>;
 }) {
   usePrismaticJoint(
     housingRef as RefObject<RapierRigidBody>,
@@ -993,45 +984,6 @@ function ClawClosedLinkage({
       [0, PLUNGER_STROKE],
     ],
   );
-
-  useBeforePhysicsStep(() => {
-    const housing = housingRef.current;
-    const plunger = plungerRef.current;
-    if (!housing || !plunger) return;
-
-    const { settings } = useGameStore.getState();
-    const { plungerMaxForce } = settings;
-    const targetStroke = THREE.MathUtils.clamp(
-      targetPlungerY.current - CLAW_GEOMETRY.openPlungerY,
-      0,
-      PLUNGER_STROKE,
-    );
-    const motion = measurePlungerMotion(housing, plunger);
-    const closing =
-      targetStroke >= PLUNGER_STROKE * 0.5;
-    const remainingTravel = closing
-      ? PLUNGER_STROKE - motion.stroke
-      : motion.stroke;
-    const actuator = computeAxialForceCommand({
-      direction: closing ? 1 : -1,
-      relativeVelocity: motion.velocity,
-      maxSpeed: settings.plungerSpeed,
-      maxForce: plungerMaxForce,
-      remainingTravel,
-    });
-    const plungerForce = motion.axis
-      .clone()
-      .multiplyScalar(actuator.force);
-    const housingReactionForce = plungerForce
-      .clone()
-      .multiplyScalar(-1);
-
-    plunger.resetForces(true);
-    housing.resetForces(true);
-    plunger.addForce(plungerForce, true);
-    housing.addForce(housingReactionForce, true);
-    actuatorForceRef.current = actuator.force;
-  });
 
   return (
     <>
@@ -1152,6 +1104,14 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     useRef<RapierRigidBody>(null),
     useRef<RapierRigidBody>(null),
   ];
+  // Counted for the HUD, so adding a linkage body keeps the tally honest.
+  const clawBodyRefs = [
+    anchorRef,
+    housingRef,
+    plungerColliderRef,
+    ...rockerColliderRefs,
+    ...fingerColliderRefs,
+  ];
   const cableRef = useRef<THREE.Mesh>(null);
   const gantryRef = useRef<THREE.Group>(null);
   const trolleyRef = useRef<THREE.Group>(null);
@@ -1167,11 +1127,11 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     [],
   );
   const plungerY = useRef<number>(CLAW_GEOMETRY.openPlungerY);
-  const cableLength = useRef(RETRACTED_CABLE_LENGTH);
-  const trolleyPosition = useRef({ x: 0, z: 0 });
-  const trolleyVelocity = useRef({ x: 0, z: 0 });
-  const phaseElapsed = useRef(0);
-  const lastPhase = useRef(useGameStore.getState().phase);
+  // Everything the pure machine step owns lives in one place.
+  const machine = useRef(createMachineState(RETRACTED_CABLE_LENGTH));
+  // The trolley meshes catch up to the simulated trolley within one physics
+  // step, so a display faster than PHYSICS_TIME_STEP still moves smoothly.
+  const visualTrolley = useRef({ x: 0, z: 0 });
   const frameAccumulator = useRef(0);
   const frameCount = useRef(0);
   const minFps = useRef(60);
@@ -1180,6 +1140,22 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const observedPlungerVelocity = useRef(0);
   const ropeJoint = useRef<RopeImpulseJoint | null>(null);
   const ropeJointLength = useRef(Number.NaN);
+  const cableAnchor = useRef(new THREE.Vector3());
+  const cableAttachment = useRef(new THREE.Vector3());
+  const visualAnchor = useRef(new THREE.Vector3());
+  const drumDirection = useRef(0);
+  // Brackets world.step() via the before/after step hooks, so the reported
+  // figure is the actual simulation cost rather than the render callback.
+  const stepStartedAt = useRef(0);
+  const physicsStepMs = useRef(0);
+  // Written by the physics step, read by the render pass for the HUD.
+  const telemetry = useRef({
+    cableOverrun: 0,
+    cableDistance: 0,
+    swingAngle: 0,
+    plungerStroke: 0,
+    plungerVelocity: 0,
+  });
   const debug = useGameStore((state) => state.debug);
   const clawFriction = useGameStore((state) => state.settings.clawFriction);
   const swingLinearDamping = useGameStore(
@@ -1217,23 +1193,15 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     ] as [number, number, number],
     [clawPartSpecs.housingDiameter, clawPartSpecs.housingHeight],
   );
-
-  useEffect(() => {
-    const previousSolverIterations = world.numSolverIterations;
-    const previousInternalIterations = world.numInternalPgsIterations;
-    // Rapier exposes solver tuning through mutable World properties.
-    // eslint-disable-next-line react-hooks/immutability
-    world.numSolverIterations = Math.max(previousSolverIterations, 12);
-    world.numInternalPgsIterations = Math.max(
-      previousInternalIterations,
-      2,
-    );
-
-    return () => {
-      world.numSolverIterations = previousSolverIterations;
-      world.numInternalPgsIterations = previousInternalIterations;
-    };
-  }, [world]);
+  // Purely a function of the editable geometry, so it only needs recomputing
+  // when the part specs change.
+  const tipClearanceMillimetres = useMemo(
+    () =>
+      Number(
+        (sampleClawClearance(101, editableClawGeometry) * 1000).toFixed(0),
+      ),
+    [editableClawGeometry],
+  );
 
   useEffect(
     () => () => {
@@ -1253,50 +1221,29 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     [umbilicalGeometry],
   );
 
-  useFrame((_, unsafeDelta) => {
-    const started = performance.now();
-    const delta = Math.min(unsafeDelta, 0.04);
-    const state = useGameStore.getState();
-    const { settings, phase, input } = state;
-    const minimumCableLength = RETRACTED_CABLE_LENGTH;
-    cableLength.current = THREE.MathUtils.clamp(
-      cableLength.current,
-      minimumCableLength,
-      maximumCableLength,
-    );
+  /**
+   * The one place that writes to the physics world, driven by the fixed
+   * simulation clock rather than the display refresh rate. Order matters:
+   * measure, decide, then apply.
+   */
+  useBeforePhysicsStep(() => {
+    stepStartedAt.current = performance.now();
     const housing = housingRef.current;
     const anchorBody = anchorRef.current;
     const plunger = plungerColliderRef.current;
     if (!housing || !anchorBody) return;
 
-    frameAccumulator.current += delta;
-    frameCount.current += 1;
-    if (delta > 0) minFps.current = Math.min(minFps.current, 1 / delta);
+    const state = useGameStore.getState();
+    const { settings } = state;
+    const delta = PHYSICS_TIME_STEP;
 
-    if (lastPhase.current !== phase) {
-      lastPhase.current = phase;
-      phaseElapsed.current = 0;
-    } else {
-      phaseElapsed.current += delta;
-    }
-
-    const forceClosed =
-      phase === "aiming"
-        ? state.manualPlungerState === "closed"
-        : phase === "closing" ||
-          phase === "lifting" ||
-          phase === "returning";
-    const closedTargetY = CLAW_GEOMETRY.closedPlungerY;
-    const plungerDestination = forceClosed
-      ? closedTargetY
-      : PLUNGER_OPEN_TARGET_Y;
-    plungerY.current = plungerDestination;
-    const measuredPlungerMotion = plunger
+    // --- measure ---------------------------------------------------------
+    const rawMotion = plunger
       ? measurePlungerMotion(housing, plunger)
       : null;
-    if (measuredPlungerMotion) {
+    if (rawMotion) {
       const rawVelocity =
-        (measuredPlungerMotion.stroke - lastPlungerStroke.current) /
+        (rawMotion.stroke - lastPlungerStroke.current) /
         Math.max(delta, 0.0001);
       const smoothing = 1 - Math.exp(-delta * 18);
       observedPlungerVelocity.current = THREE.MathUtils.lerp(
@@ -1304,202 +1251,115 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         rawVelocity,
         smoothing,
       );
-      lastPlungerStroke.current = measuredPlungerMotion.stroke;
+      lastPlungerStroke.current = rawMotion.stroke;
     }
-    const plungerMotion = measuredPlungerMotion
+    // Phase transitions read the smoothed stroke rate so contact chatter does
+    // not look like a settled plunger; the actuator keeps the raw relative
+    // velocity so its speed cutoff stays responsive.
+    const plungerMotion = rawMotion
       ? {
-          ...measuredPlungerMotion,
+          stroke: rawMotion.stroke,
           velocity: observedPlungerVelocity.current,
         }
       : null;
 
-    const previousCableLength = cableLength.current;
-    let desiredX = 0;
-    let desiredZ = 0;
-    if (phase === "aiming") {
-      desiredX = input.x * settings.moveSpeed;
-      desiredZ = input.z * settings.moveSpeed;
-    } else if (phase === "returning") {
-      const dx = CHUTE_X - trolleyPosition.current.x;
-      const dz = CHUTE_Z - trolleyPosition.current.z;
-      const distance = Math.hypot(dx, dz);
-      if (distance > 0.02) {
-        desiredX =
-          (dx / distance) *
-          settings.moveSpeed *
-          settings.returnSpeedMultiplier;
-        desiredZ =
-          (dz / distance) *
-          settings.moveSpeed *
-          settings.returnSpeedMultiplier;
-      }
-    }
-
-    const acceleration =
-      settings.trolleyAcceleration *
-      (phase === "aiming"
-        ? 1
-        : settings.returnAccelerationMultiplier);
-    trolleyVelocity.current.x = approach(
-      trolleyVelocity.current.x,
-      desiredX,
-      acceleration * delta,
-    );
-    trolleyVelocity.current.z = approach(
-      trolleyVelocity.current.z,
-      desiredZ,
-      acceleration * delta,
-    );
-    trolleyPosition.current.x = THREE.MathUtils.clamp(
-      trolleyPosition.current.x + trolleyVelocity.current.x * delta,
-      -CLAW_LIMIT_X,
-      CLAW_LIMIT_X,
-    );
-    trolleyPosition.current.z = THREE.MathUtils.clamp(
-      trolleyPosition.current.z + trolleyVelocity.current.z * delta,
-      -CLAW_LIMIT_Z,
-      CLAW_LIMIT_Z,
+    const bodyPosition = housing.translation();
+    const actualCableLength = Math.hypot(
+      machine.current.trolley.x - bodyPosition.x,
+      WIRE_EXIT_Y - (bodyPosition.y + CLAW_ATTACHMENT_Y),
+      machine.current.trolley.z - bodyPosition.z,
     );
 
-    if (
-      Math.abs(trolleyPosition.current.x) >= CLAW_LIMIT_X &&
-      Math.sign(trolleyVelocity.current.x) ===
-        Math.sign(trolleyPosition.current.x)
-    ) {
-      trolleyVelocity.current.x = 0;
-    }
-    if (
-      Math.abs(trolleyPosition.current.z) >= CLAW_LIMIT_Z &&
-      Math.sign(trolleyVelocity.current.z) ===
-        Math.sign(trolleyPosition.current.z)
-    ) {
-      trolleyVelocity.current.z = 0;
-    }
-
-    const manualCableDirection =
-      phase === "aiming" ? state.manualCableDirection : null;
-    if (manualCableDirection === "lower") {
-      cableLength.current = Math.min(
+    // --- decide ----------------------------------------------------------
+    const closedTargetY = CLAW_GEOMETRY.closedPlungerY;
+    const command = stepMachine({
+      machine: machine.current,
+      phase: state.phase,
+      result: state.result,
+      input: state.input,
+      manualPlungerState: state.manualPlungerState,
+      manualCableDirection: state.manualCableDirection,
+      settings,
+      limits: {
+        minimumCableLength: RETRACTED_CABLE_LENGTH,
         maximumCableLength,
-        cableLength.current + settings.lowerSpeed * delta,
-      );
-      if (cableLength.current >= maximumCableLength - 0.001) {
-        state.setManualCableDirection(null);
-      }
-    } else if (manualCableDirection === "raise") {
-      cableLength.current = Math.max(
-        minimumCableLength,
-        cableLength.current - settings.liftSpeed * delta,
-      );
-      if (cableLength.current <= minimumCableLength + 0.001) {
-        state.setManualCableDirection(null);
-      }
-    } else if (phase === "descending") {
-      cableLength.current = Math.min(
-        maximumCableLength,
-        cableLength.current + settings.lowerSpeed * delta,
-      );
-      const bodyPosition = housing.translation();
-      const actualLength = Math.hypot(
-        trolleyPosition.current.x - bodyPosition.x,
-        WIRE_EXIT_Y - (bodyPosition.y + CLAW_ATTACHMENT_Y),
-        trolleyPosition.current.z - bodyPosition.z,
-      );
-      if (
-        cableLength.current >= maximumCableLength - 0.001 &&
-        (actualLength >= maximumCableLength - 0.07 ||
-          phaseElapsed.current > 3)
-      ) {
-        state.setPhase("closing");
-      }
-    }
-
-    if (phase === "closing") {
-      const stoppedUnderLoad =
-        phaseElapsed.current > settings.plungerStallTimeout &&
-        plungerMotion !== null &&
-        Math.abs(plungerMotion.velocity) <=
-          settings.plungerVelocityTolerance;
-      if (
-        isPlungerSettled(
-          plungerMotion,
-          closedTargetY,
-          settings.plungerPositionTolerance,
-          settings.plungerVelocityTolerance,
-        ) ||
-        stoppedUnderLoad
-      ) {
-        state.record("grip_attempt", {
-          contactModel: "collider-only",
-          actuator: "plunger-stroke",
-          maxForce: settings.plungerMaxForce,
-          measuredForce: Number(
-            Math.abs(actuatorForce.current).toFixed(2),
-          ),
-        });
-        state.setPhase("lifting");
-      }
-    }
-
-    if (!manualCableDirection && phase === "lifting") {
-      cableLength.current = Math.max(
-        minimumCableLength,
-        cableLength.current - settings.liftSpeed * delta,
-      );
-      if (cableLength.current <= minimumCableLength + 0.001) {
-        state.setPhase("returning");
-      }
-    }
-
-    if (phase === "returning") {
-      const distance = Math.hypot(
-        CHUTE_X - trolleyPosition.current.x,
-        CHUTE_Z - trolleyPosition.current.z,
-      );
-      if (distance < 0.035 && Math.hypot(desiredX, desiredZ) < 0.01) {
-        state.setPhase("releasing");
-      }
-    }
-
-    if (phase === "releasing") {
-      const stoppedUnderLoad =
-        phaseElapsed.current > settings.plungerStallTimeout &&
-        plungerMotion !== null &&
-        Math.abs(plungerMotion.velocity) <=
-          settings.plungerVelocityTolerance;
-      if (
-        isPlungerSettled(
-          plungerMotion,
-          PLUNGER_OPEN_TARGET_Y,
-          settings.plungerPositionTolerance,
-          settings.plungerVelocityTolerance,
-        ) ||
-        stoppedUnderLoad
-      ) {
-        state.setPhase("settling");
-      }
-    }
-
-    if (phase === "settling" && phaseElapsed.current > 3.1) {
-      if (!state.result) state.finish("lose");
-      state.setPhase("result");
-    }
-
-    if (gantryRef.current) {
-      gantryRef.current.position.z = trolleyPosition.current.z;
-    }
-    if (trolleyRef.current) {
-      trolleyRef.current.position.x = trolleyPosition.current.x;
-      trolleyRef.current.position.z = trolleyPosition.current.z;
-    }
-    anchorBody.setNextKinematicTranslation({
-      x: trolleyPosition.current.x,
-      y: WIRE_GUIDE_CENTER_Y,
-      z: trolleyPosition.current.z,
+        trolleyLimitX: CLAW_LIMIT_X,
+        trolleyLimitZ: CLAW_LIMIT_Z,
+        chuteX: CHUTE_X,
+        chuteZ: CHUTE_Z,
+      },
+      plunger: {
+        openY: PLUNGER_OPEN_TARGET_Y,
+        closedY: closedTargetY,
+        motion: plungerMotion,
+      },
+      actualCableLength,
+      dt: delta,
     });
+    machine.current = command.machine;
+    plungerY.current = command.plungerTarget;
+    drumDirection.current = command.drumDirection;
+
+    if (command.clearManualCableDirection) {
+      state.setManualCableDirection(null);
+    }
+    if (command.recordGripAttempt) {
+      state.record("grip_attempt", {
+        contactModel: "collider-only",
+        actuator: "plunger-stroke",
+        maxForce: settings.plungerMaxForce,
+        measuredForce: Number(
+          Math.abs(actuatorForce.current).toFixed(2),
+        ),
+      });
+    }
+    if (command.loseByTimeout) state.finish("lose");
+    if (command.nextPhase !== state.phase) state.setPhase(command.nextPhase);
+
+    // --- apply: plunger actuator -----------------------------------------
+    if (plunger && rawMotion) {
+      const targetStroke = THREE.MathUtils.clamp(
+        plungerY.current - CLAW_GEOMETRY.openPlungerY,
+        0,
+        PLUNGER_STROKE,
+      );
+      const closing = targetStroke >= PLUNGER_STROKE * 0.5;
+      const remainingTravel = closing
+        ? PLUNGER_STROKE - rawMotion.stroke
+        : rawMotion.stroke;
+      const actuator = computeAxialForceCommand({
+        direction: closing ? 1 : -1,
+        relativeVelocity: rawMotion.velocity,
+        maxSpeed: settings.plungerSpeed,
+        maxForce: settings.plungerMaxForce,
+        remainingTravel,
+      });
+      const plungerForce = rawMotion.axis
+        .clone()
+        .multiplyScalar(actuator.force);
+      const housingReactionForce = plungerForce
+        .clone()
+        .multiplyScalar(-1);
+
+      plunger.resetForces(true);
+      housing.resetForces(true);
+      plunger.addForce(plungerForce, true);
+      housing.addForce(housingReactionForce, true);
+      actuatorForce.current = actuator.force;
+    }
+
+    // --- apply: trolley and winch ----------------------------------------
+    const trolley = machine.current.trolley;
+    const cableLength = machine.current.cableLength;
+    anchorBody.setNextKinematicTranslation({
+      x: trolley.x,
+      y: WIRE_GUIDE_CENTER_Y,
+      z: trolley.z,
+    });
+
     if (
       !ropeJoint.current ||
-      Math.abs(ropeJointLength.current - cableLength.current) > 0.002
+      Math.abs(ropeJointLength.current - cableLength) > 0.002
     ) {
       const previousJoint = ropeJoint.current;
       if (
@@ -1508,9 +1368,11 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       ) {
         world.removeImpulseJoint(previousJoint, true);
       }
+      // The Rapier JS binding exposes no length setter on a rope joint, so a
+      // changed winch length means replacing the joint.
       ropeJoint.current = world.createImpulseJoint(
         rapier.JointData.rope(
-          cableLength.current,
+          cableLength,
           { x: 0, y: WIRE_EXIT_LOCAL_Y, z: 0 },
           { x: 0, y: CLAW_ATTACHMENT_Y, z: 0 },
         ),
@@ -1519,13 +1381,99 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         true,
       ) as RopeImpulseJoint;
       ropeJoint.current.setContactsEnabled(true);
-      ropeJointLength.current = cableLength.current;
+      ropeJointLength.current = cableLength;
+    }
+
+    const bodyRotation = housing.rotation();
+    const housingQuaternion = new THREE.Quaternion(
+      bodyRotation.x,
+      bodyRotation.y,
+      bodyRotation.z,
+      bodyRotation.w,
+    );
+    const attachment = cableAttachment.current
+      .set(0, CLAW_ATTACHMENT_Y, 0)
+      .applyQuaternion(housingQuaternion);
+    attachment.x += bodyPosition.x;
+    attachment.y += bodyPosition.y;
+    attachment.z += bodyPosition.z;
+    const anchor = cableAnchor.current.set(
+      trolley.x,
+      WIRE_EXIT_Y,
+      trolley.z,
+    );
+    const attachmentVelocity = housing.velocityAtPoint(attachment);
+    const cableState = measureInextensibleCable({
+      anchor,
+      attachment,
+      targetLength: cableLength,
+    });
+    if (
+      command.winding ||
+      cableState.distance >= cableLength - 0.025
+    ) {
+      const projectedVelocity = projectInextensibleCableVelocity({
+        direction: cableState.direction,
+        anchorVelocity: {
+          x: machine.current.trolleyVelocity.x,
+          y: 0,
+          z: machine.current.trolleyVelocity.z,
+        },
+        bodyLinearVelocity: housing.linvel(),
+        attachmentVelocity,
+        targetLengthRate: command.targetLengthRate,
+      });
+      housing.setLinvel(
+        projectedVelocity.bodyLinearVelocity,
+        true,
+      );
+    }
+
+    telemetry.current.cableOverrun = cableState.overrun;
+    telemetry.current.cableDistance = cableState.distance;
+    telemetry.current.swingAngle = cableState.swingAngle;
+    telemetry.current.plungerStroke = plungerMotion?.stroke ?? 0;
+    telemetry.current.plungerVelocity = plungerMotion?.velocity ?? 0;
+  });
+
+  useAfterPhysicsStep(() => {
+    physicsStepMs.current = performance.now() - stepStartedAt.current;
+  });
+
+  useFrame((_, unsafeDelta) => {
+    const delta = Math.min(unsafeDelta, 0.04);
+    const state = useGameStore.getState();
+    const { settings } = state;
+    const housing = housingRef.current;
+    if (!housing) return;
+
+    frameAccumulator.current += delta;
+    frameCount.current += 1;
+    if (delta > 0) minFps.current = Math.min(minFps.current, 1 / delta);
+
+    // Catch the trolley meshes up to the simulated trolley within a single
+    // physics step: exact at 60 Hz or below, smoothed on faster displays.
+    const catchUp = Math.min(1, delta / PHYSICS_TIME_STEP);
+    visualTrolley.current.x = THREE.MathUtils.lerp(
+      visualTrolley.current.x,
+      machine.current.trolley.x,
+      catchUp,
+    );
+    visualTrolley.current.z = THREE.MathUtils.lerp(
+      visualTrolley.current.z,
+      machine.current.trolley.z,
+      catchUp,
+    );
+
+    if (gantryRef.current) {
+      gantryRef.current.position.z = visualTrolley.current.z;
+    }
+    if (trolleyRef.current) {
+      trolleyRef.current.position.x = visualTrolley.current.x;
+      trolleyRef.current.position.z = visualTrolley.current.z;
     }
     if (drumRef.current) {
-      drumRef.current.rotation.y +=
-        (phase === "descending" ? 1 : phase === "lifting" ? -1 : 0) *
-        delta *
-        5;
+      drumRef.current.rotation.y += drumDirection.current * delta * 5;
     }
 
     const bodyPosition = housing.translation();
@@ -1536,52 +1484,15 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       bodyRotation.z,
       bodyRotation.w,
     );
-    const attachmentOffset = new THREE.Vector3(
-      0,
-      CLAW_ATTACHMENT_Y,
-      0,
-    ).applyQuaternion(housingQuaternion);
-    const attachment = new THREE.Vector3(
-      bodyPosition.x + attachmentOffset.x,
-      bodyPosition.y + attachmentOffset.y,
-      bodyPosition.z + attachmentOffset.z,
+    setMeshBetween(
+      cableRef.current,
+      visualAnchor.current.set(
+        visualTrolley.current.x,
+        WIRE_EXIT_Y,
+        visualTrolley.current.z,
+      ),
+      cableAttachment.current,
     );
-    const anchor = new THREE.Vector3(
-      trolleyPosition.current.x,
-      WIRE_EXIT_Y,
-      trolleyPosition.current.z,
-    );
-    const attachmentVelocity = housing.velocityAtPoint(attachment);
-    const cableState = measureInextensibleCable({
-      anchor,
-      attachment,
-      targetLength: cableLength.current,
-    });
-    const targetLengthRate =
-      (cableLength.current - previousCableLength) / Math.max(delta, 0.0001);
-    if (
-      phase === "descending" ||
-      phase === "lifting" ||
-      cableState.distance >= cableLength.current - 0.025
-    ) {
-      const projectedVelocity = projectInextensibleCableVelocity({
-        direction: cableState.direction,
-        anchorVelocity: {
-          x: trolleyVelocity.current.x,
-          y: 0,
-          z: trolleyVelocity.current.z,
-        },
-        bodyLinearVelocity: housing.linvel(),
-        attachmentVelocity,
-        targetLengthRate,
-      });
-      housing.setLinvel(
-        projectedVelocity.bodyLinearVelocity,
-        true,
-      );
-    }
-
-    setMeshBetween(cableRef.current, anchor, attachment);
 
     const bodyWorldPosition = new THREE.Vector3(
       bodyPosition.x,
@@ -1595,10 +1506,10 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     const trolleyOutwardDirection = new THREE.Vector3(-1, 0, 0);
     const trolleyConnectionInset = cableStrandRadius * 0.35;
     const trolleyConnection = new THREE.Vector3(
-      trolleyPosition.current.x -
+      visualTrolley.current.x -
         (TROLLEY_BODY_SIZE / 2 - trolleyConnectionInset),
       TROLLEY_Y,
-      trolleyPosition.current.z,
+      visualTrolley.current.z,
     );
     const umbilicalTop = trolleyConnection
       .clone()
@@ -1744,26 +1655,25 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       state.updateMetrics({
         fps,
         minFps: Math.round(Math.min(minFps.current, fps)),
-        physicsMs: Number((performance.now() - started).toFixed(2)),
+        physicsMs: Number(physicsStepMs.current.toFixed(2)),
         activeBodies:
-          Object.values(bodies.current).filter(Boolean).length + 9,
-        cableError: Number((cableState.overrun * 1000).toFixed(1)),
-        cableLength: Number(cableLength.current.toFixed(2)),
-        cableDistance: Number(cableState.distance.toFixed(2)),
-        swingAngle: Number(cableState.swingAngle.toFixed(1)),
-        tipClearance: Number(
-          (
-            sampleClawClearance(101, editableClawGeometry) * 1000
-          ).toFixed(0),
+          Object.values(bodies.current).filter(Boolean).length +
+          clawBodyRefs.filter((ref) => ref.current !== null).length,
+        cableError: Number(
+          (telemetry.current.cableOverrun * 1000).toFixed(1),
         ),
+        cableLength: Number(machine.current.cableLength.toFixed(2)),
+        cableDistance: Number(telemetry.current.cableDistance.toFixed(2)),
+        swingAngle: Number(telemetry.current.swingAngle.toFixed(1)),
+        tipClearance: tipClearanceMillimetres,
         plungerForce: Number(
           Math.abs(actuatorForce.current).toFixed(2),
         ),
         plungerStroke: Number(
-          ((plungerMotion?.stroke ?? 0) * 1000).toFixed(1),
+          (telemetry.current.plungerStroke * 1000).toFixed(1),
         ),
         plungerVelocity: Number(
-          (plungerMotion?.velocity ?? 0).toFixed(3),
+          telemetry.current.plungerVelocity.toFixed(3),
         ),
       });
       frameAccumulator.current = 0;
@@ -1956,8 +1866,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         plungerRef={plungerColliderRef}
         rockerRefs={rockerColliderRefs}
         fingerRefs={fingerColliderRefs}
-        targetPlungerY={plungerY}
-        actuatorForceRef={actuatorForce}
       />
     </>
   );

@@ -53,10 +53,8 @@ test("the hoist cable starts at the guide exit instead of its solid center", asy
     source,
     /rapier\.JointData\.rope\([\s\S]*?\{ x: 0, y: WIRE_EXIT_LOCAL_Y, z: 0 \}/,
   );
-  assert.match(
-    source,
-    /const anchor = new THREE\.Vector3\([\s\S]*?WIRE_EXIT_Y/,
-  );
+  // Tolerant of how the vector is built, strict about the height it uses.
+  assert.match(source, /const anchor = [\s\S]{0,160}WIRE_EXIT_Y/);
   assert.match(
     source,
     /const CLAW_START_Y =\s*WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH/,

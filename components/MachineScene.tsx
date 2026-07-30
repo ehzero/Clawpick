@@ -16,8 +16,11 @@ import MechanicalClaw, {
   OverheadRails,
 } from "./MechanicalClaw";
 import {
+  INTERNAL_PGS_ITERATIONS,
+  PHYSICS_TIME_STEP,
   PRIZE_DECK_COLLIDER_CENTER_Y,
   PRIZE_DECK_COLLIDER_HALF_HEIGHT,
+  SOLVER_ITERATIONS,
 } from "@/game/machineDimensions.mjs";
 import { useGameStore } from "@/game/store";
 
@@ -594,7 +597,9 @@ function Cabinet({ showVisuals }: { showVisuals: boolean }) {
 function SceneContent() {
   const bodies = useRef<Record<string, RapierRigidBody | null>>({});
   const round = useGameStore((state) => state.round);
-  const settings = useGameStore((state) => state.settings);
+  // Subscribe to the one setting the scene needs, so dragging an unrelated
+  // slider does not re-render the whole cabinet.
+  const gravity = useGameStore((state) => state.settings.gravity);
   const debug = useGameStore((state) => state.debug);
   const registerBody = useCallback(
     (id: string, body: RapierRigidBody | null) => {
@@ -620,8 +625,10 @@ function SceneContent() {
 
       <Physics
         key={round}
-        gravity={[0, settings.gravity, 0]}
-        timeStep={1 / 60}
+        gravity={[0, gravity, 0]}
+        timeStep={PHYSICS_TIME_STEP}
+        numSolverIterations={SOLVER_ITERATIONS}
+        numInternalPgsIterations={INTERNAL_PGS_ITERATIONS}
         debug={debug}
       >
         <Cabinet showVisuals={!debug} />

@@ -25,7 +25,13 @@ interface PrizeProps {
 }
 
 export function Prize({ id, index, position, registerBody }: PrizeProps) {
-  const settings = useGameStore((state) => state.settings);
+  // Narrow selectors keep the twenty prizes out of every unrelated slider drag.
+  const mass = useGameStore((state) => state.settings.prizeMass);
+  const friction = useGameStore((state) => state.settings.prizeFriction);
+  const linearDamping = useGameStore(
+    (state) => state.settings.prizeLinearDamping,
+  );
+  const angularDamping = useGameStore((state) => state.settings.angularDamping);
   const debug = useGameStore((state) => state.debug);
   const color = COLORS[index % COLORS.length];
   const accent = index % 2 === 0 ? "#fff5dc" : "#f8ebff";
@@ -35,9 +41,14 @@ export function Prize({ id, index, position, registerBody }: PrizeProps) {
       ref={(body) => registerBody(id, body)}
       colliders={false}
       position={position}
-      linearDamping={settings.prizeLinearDamping}
-      angularDamping={settings.angularDamping}
-      canSleep
+      linearDamping={linearDamping}
+      angularDamping={angularDamping}
+      // Rapier's linear sleep threshold is 0.1 m/s and is not settable from
+      // the JS bindings. At this cabinet's scale a prize creeping well below
+      // that is still visibly moving, so sleeping freezes it mid-drift and a
+      // neighbour's contact restarts it — a visible stop/go stutter. Staying
+      // awake costs little for twenty bodies; damping brings them to rest.
+      canSleep={false}
       ccd
       userData={{ prizeId: id }}
       name={id}
@@ -45,16 +56,16 @@ export function Prize({ id, index, position, registerBody }: PrizeProps) {
       <CapsuleCollider
         args={[0.16, 0.22]}
         position={[0, 0.19, 0]}
-        friction={settings.prizeFriction}
+        friction={friction}
         restitution={0.03}
-        mass={settings.prizeMass * 0.62}
+        mass={mass * 0.62}
       />
       <BallCollider
         args={[0.25]}
         position={[0, 0.52, 0]}
-        friction={settings.prizeFriction}
+        friction={friction}
         restitution={0.03}
-        mass={settings.prizeMass * 0.38}
+        mass={mass * 0.38}
       />
 
       <group name={`${id}-render-meshes`} visible={!debug}>

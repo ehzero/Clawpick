@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  createMachineState,
+  stepMachine,
+} from "../game/machineStep.mjs";
+import {
   migratePersistedSettings,
   SETTINGS_STORAGE_VERSION,
 } from "../game/settingsMigration.mjs";
@@ -30,8 +34,10 @@ test("the control deck exposes manual wire and claw controls", async () => {
   assert.doesNotMatch(panel, /플런저 강제 상태/);
   assert.match(store, /manualPlungerState: "open"/);
   assert.match(store, /manualCableDirection: null/);
-  assert.match(claw, /state\.manualPlungerState === "closed"/);
-  assert.match(claw, /state\.manualCableDirection/);
+  // Both manual controls have to reach the machine step, which is where the
+  // open/closed mapping itself is asserted (tests/machine-step.test.mjs).
+  assert.match(claw, /manualPlungerState: state\.manualPlungerState/);
+  assert.match(claw, /manualCableDirection: state\.manualCableDirection/);
   assert.match(claw, /const closedTargetY = CLAW_GEOMETRY\.closedPlungerY/);
   assert.match(claw, /PLUNGER_OPEN_TARGET_Y/);
 });
@@ -85,16 +91,76 @@ test("manual and automatic winches share fixed geometric cable limits", async ()
   assert.doesNotMatch(panel, /setting: "cableExtendedLength"/);
   assert.doesNotMatch(store, /cableRetractedLength:/);
   assert.doesNotMatch(store, /cableExtendedLength:/);
-  assert.match(
-    claw,
-    /const minimumCableLength = RETRACTED_CABLE_LENGTH/,
-  );
+  // Travel comes from the retracted constant and the geometric maximum, never
+  // from a tunable setting.
+  assert.match(claw, /minimumCableLength: RETRACTED_CABLE_LENGTH/);
   assert.match(
     claw,
     /const maximumCableLength = useMemo\([\s\S]*?calculateMaximumCableLength/,
   );
-  assert.match(claw, /cableLength\.current >= maximumCableLength - 0\.001/);
-  assert.match(claw, /cableLength\.current <= minimumCableLength \+ 0\.001/);
+});
+
+test("the manual and automatic winches stop at the same two limits", () => {
+  const limits = {
+    minimumCableLength: 0.01,
+    maximumCableLength: 2.4,
+    trolleyLimitX: 2.32,
+    trolleyLimitZ: 1.38,
+    chuteX: 2.28,
+    chuteZ: 1.18,
+  };
+  const settings = {
+    moveSpeed: 1.35,
+    trolleyAcceleration: 5.2,
+    returnSpeedMultiplier: 0.9,
+    returnAccelerationMultiplier: 0.73,
+    lowerSpeed: 1.1,
+    liftSpeed: 1.25,
+    plungerStallTimeout: 2.4,
+    plungerPositionTolerance: 0.006,
+    plungerVelocityTolerance: 0.018,
+    plungerSpeed: 0.19,
+    plungerMaxForce: 18,
+  };
+  const plunger = { openY: -0.42, closedY: -0.298, motion: null };
+
+  const wind = ({ phase, manualCableDirection }) => {
+    let machine = {
+      ...createMachineState(
+        manualCableDirection === "raise" || phase === "lifting"
+          ? limits.maximumCableLength
+          : limits.minimumCableLength,
+      ),
+      phase,
+    };
+    for (let index = 0; index < 600; index += 1) {
+      machine = stepMachine({
+        machine,
+        phase,
+        result: null,
+        input: { x: 0, z: 0 },
+        manualPlungerState: "open",
+        manualCableDirection,
+        settings,
+        limits,
+        plunger,
+        actualCableLength: machine.cableLength,
+        dt: 1 / 60,
+      }).machine;
+    }
+    return machine.cableLength;
+  };
+
+  assert.equal(
+    wind({ phase: "aiming", manualCableDirection: "lower" }),
+    wind({ phase: "descending", manualCableDirection: null }),
+    "manual and automatic lowering must reach the same geometric stop",
+  );
+  assert.equal(
+    wind({ phase: "aiming", manualCableDirection: "raise" }),
+    wind({ phase: "lifting", manualCableDirection: null }),
+    "manual and automatic lifting must reach the same retracted stop",
+  );
 });
 
 test("linkage rigid bodies omit damping and use Rapier defaults", async () => {
