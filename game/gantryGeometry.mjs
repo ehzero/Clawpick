@@ -18,6 +18,17 @@
  *   carriage         ▓▓▓    hangs clear below the rods
  *      wire guide     ◉     bolted under the carriage
  *
+ * Seen along the bridge, the left end also carries the travel drive:
+ *
+ *   ═╤═══════════════════   side rail
+ *    │ (○)                  driven rail wheel on a thick output shaft
+ *   ▐█████▌════════════      gearcase bolted to the end plate, the three
+ *    │ ███ │                 bridge rods ending inside it
+ *      ███                  motor can hanging below the gearcase
+ *
+ * That gearcase is what the carriage runs into on the left, so X travel is not
+ * symmetric about the machine centre.
+ *
  * Pure data plus derived travel, so the renderer and the physics bodies read
  * one source instead of repeating magic numbers.
  */
@@ -80,10 +91,61 @@ export const RAIL = Object.freeze({
 /** The bridge: a rod pair plus a tie rod, on end plates, riding the side rods. */
 export const BRIDGE = Object.freeze({
   y: 3.8,
-  mass: 4,
+  /** Rods, plates and the travel gearmotor together. */
+  mass: 5.2,
   /** Rail wheels sit this far fore and aft, giving the bridge its anti-tip base. */
   wheelZ: 0.17,
+  /**
+   * How the bridge mass is split across its colliders. The gearmotor is a third
+   * of the assembly, which is why it is worth carrying rather than assuming a
+   * massless drive. Shares must sum to one over the parts each is applied to:
+   * two rods, one tie, two plates, one gearcase, one motor.
+   */
+  massShare: Object.freeze({
+    rod: 0.26,
+    tie: 0.11,
+    endPlate: 0.055,
+    driveCase: 0.19,
+    driveMotor: 0.07,
+  }),
 });
+
+/**
+ * Bridge travel drive: the geared motor on the left end plate that turns the two
+ * rail wheels on that side, which is what moves the whole bridge along the fixed
+ * side rods. The far plate's wheels idle.
+ *
+ * It lives inboard of the plate, in the only pocket the layout leaves free, and
+ * that is also the pocket the carriage would otherwise run through — so the
+ * gearcase face is the carriage's left mechanical end stop.
+ */
+export const TRAVEL_DRIVE = Object.freeze({
+  /** Which end plate carries it. Left, as on the reference machine. */
+  side: -1,
+  /** How far the gearcase reaches inboard of the end plate's inner face. */
+  caseDepth: 0.28,
+  /** The case is a box bolted onto the plate, inset from the plate outline. */
+  caseInset: 0.02,
+  /** Motor can, hanging under the gearcase where nothing else passes. */
+  motorRadius: 0.085,
+  motorLength: 0.3,
+  motorFins: 3,
+  /**
+   * Bolted inspection cover. It goes on the aft face rather than the inboard one
+   * because the inboard face is the carriage's end stop and has to stay flat.
+   */
+  coverThickness: 0.016,
+  /** Terminal box on top of the case, with the drive's cable glands aft. */
+  terminal: Object.freeze({ width: 0.18, height: 0.07, depth: 0.22 }),
+  glandRadius: 0.016,
+  glandLength: 0.08,
+  glandSpacing: 0.08,
+  /** Driven output shaft, thicker than the plain stub axle it replaces. */
+  shaftRadius: 0.03,
+});
+
+/** Plain stub axle a wheel turns on where it is not driven. */
+const STUB_AXLE_RADIUS = 0.016;
 
 /** The carriage, straddling both bridge rods and hanging below them. */
 export const TROLLEY = Object.freeze({
@@ -110,6 +172,71 @@ export function normalizeGantryPartSpecs(specs) {
     wheelGrooveWidth: Math.max(
       spec.wheelGrooveWidth,
       spec.rodDiameter + 0.02,
+    ),
+  };
+}
+
+/**
+ * Places the travel drive against one end plate. Everything is local to the
+ * bridge body and on the drive side's own sign of X, so the renderer can mirror
+ * nothing and read these straight.
+ */
+function travelDriveLayout({ plateInnerX, plateHeight, plateLocalY }) {
+  const caseHeight = plateHeight - TRAVEL_DRIVE.caseInset * 2;
+  const caseWidth = END_PLATE.depth - TRAVEL_DRIVE.caseInset * 2;
+  // Measured from the machine centre outwards, so the carriage's stop follows
+  // from one subtraction rather than from a sign.
+  const innerFaceX = plateInnerX - TRAVEL_DRIVE.caseDepth;
+  const caseX = innerFaceX + TRAVEL_DRIVE.caseDepth / 2;
+  const caseTopLocalY = plateLocalY + caseHeight / 2;
+
+  return {
+    side: TRAVEL_DRIVE.side,
+    /** Gearcase, bolted to the plate with the three bridge rods ending inside. */
+    case: {
+      depth: TRAVEL_DRIVE.caseDepth,
+      height: caseHeight,
+      width: caseWidth,
+      x: caseX,
+      y: plateLocalY,
+    },
+    /** Motor can, hanging below the case clear of the rods and the carriage. */
+    motor: {
+      radius: TRAVEL_DRIVE.motorRadius,
+      length: TRAVEL_DRIVE.motorLength,
+      fins: TRAVEL_DRIVE.motorFins,
+      x: caseX,
+      y: plateLocalY - caseHeight / 2 - TRAVEL_DRIVE.motorLength / 2,
+    },
+    cover: {
+      thickness: TRAVEL_DRIVE.coverThickness,
+      height: caseHeight * 0.66,
+      width: TRAVEL_DRIVE.caseDepth * 0.66,
+      x: caseX,
+      y: plateLocalY,
+      z: caseWidth / 2 + TRAVEL_DRIVE.coverThickness / 2,
+    },
+    terminal: {
+      ...TRAVEL_DRIVE.terminal,
+      x: caseX,
+      y: caseTopLocalY + TRAVEL_DRIVE.terminal.height / 2,
+    },
+    gland: {
+      radius: TRAVEL_DRIVE.glandRadius,
+      length: TRAVEL_DRIVE.glandLength,
+      spacing: TRAVEL_DRIVE.glandSpacing,
+      y: caseTopLocalY + TRAVEL_DRIVE.terminal.height / 2,
+      z: TRAVEL_DRIVE.terminal.depth / 2,
+    },
+    /** The driven wheels' output shafts, against plain stubs on the far plate. */
+    shaftRadius: TRAVEL_DRIVE.shaftRadius,
+    /** |x| of the face the carriage runs into. */
+    innerFaceX,
+    /** Highest and widest points, so the assembly is checked like the rest. */
+    localTopY: caseTopLocalY + TRAVEL_DRIVE.terminal.height,
+    halfDepth: Math.max(
+      caseWidth / 2 + TRAVEL_DRIVE.coverThickness,
+      TRAVEL_DRIVE.terminal.depth / 2 + TRAVEL_DRIVE.glandLength,
     ),
   };
 }
@@ -150,10 +277,32 @@ export function createGantryGeometry(specs = {}) {
 
   const bridgeWheelY = RAIL.y + rodRadius + wheelSpec.grooveRadius;
   const trolleyWheelY = BRIDGE.y + rodRadius + wheelSpec.grooveRadius;
+
+  // End plate, in the bridge body's own coordinates. The drive bolts onto it, so
+  // both read the same two numbers.
+  const plateBottomLocalY = -rodRadius - 0.02;
+  const plateTopLocalY = bridgeWheelY - BRIDGE.y + rodRadius + 0.02;
+  const plateHeight = plateTopLocalY - plateBottomLocalY;
+  const plateLocalY = plateBottomLocalY + plateHeight / 2;
+  const plateInnerX = endPlateX - END_PLATE.thickness / 2;
+
+  const travelDrive = travelDriveLayout({
+    plateInnerX,
+    plateHeight,
+    plateLocalY,
+  });
+
   const halfDepth = Math.max(
     rodSpacingZ + rodRadius,
     BRIDGE.wheelZ + wheelSpec.flangeRadius,
+    travelDrive.halfDepth,
   );
+
+  // The carriage runs out of rod at the end plate on one side and at the travel
+  // gearcase on the other, so its two limits are genuinely different numbers.
+  const clearOfPlateX = plateInnerX - TROLLEY.size / 2;
+  const clearOfDriveX = travelDrive.innerFaceX - TROLLEY.size / 2;
+  const driveOnLeft = travelDrive.side < 0;
 
   return {
     rodRadius,
@@ -166,20 +315,28 @@ export function createGantryGeometry(specs = {}) {
     rodSpan,
     endPlate: END_PLATE,
     endPlateX,
+    plateHeight,
+    /** Plate centre in the bridge body's coordinates. */
+    plateLocalY,
     /** Stub axle from that plate face out through the wheel. */
     stubAxleX: railX - wheelSpec.width / 2,
+    stubAxleRadius: STUB_AXLE_RADIUS,
+    travelDrive,
     bridgeWheelY,
     tieY: bridgeWheelY,
     trolleyWheelY,
     trolleyWheelSpacingX: spec.trolleyWheelSpacing / 2,
     halfDepth,
     travelZ: stopZ - RAIL.stopLength / 2 - halfDepth,
-    /**
-     * The carriage runs out of rod at the end plate, not at the rod end — the
-     * plate is what stands in its path.
-     */
-    travelX: endPlateX - END_PLATE.thickness / 2 - TROLLEY.size / 2,
-    topY: bridgeWheelY + wheelSpec.flangeRadius,
+    /** Where the carriage stops against the end plate, and against the drive. */
+    travelToPlateX: clearOfPlateX,
+    travelToDriveX: clearOfDriveX,
+    travelMinX: -(driveOnLeft ? clearOfDriveX : clearOfPlateX),
+    travelMaxX: driveOnLeft ? clearOfPlateX : clearOfDriveX,
+    topY: Math.max(
+      bridgeWheelY + wheelSpec.flangeRadius,
+      BRIDGE.y + travelDrive.localTopY,
+    ),
     /** Outermost wheel face, which must stay inboard of the top trim. */
     wheelOuterX: railX + wheelSpec.width / 2,
   };
@@ -193,7 +350,8 @@ export const BRIDGE_TIE_Y = DEFAULT_GANTRY_LAYOUT.tieY;
 export const TROLLEY_WHEEL_Y = DEFAULT_GANTRY_LAYOUT.trolleyWheelY;
 export const BRIDGE_HALF_DEPTH = DEFAULT_GANTRY_LAYOUT.halfDepth;
 export const BRIDGE_TRAVEL_Z = DEFAULT_GANTRY_LAYOUT.travelZ;
-export const TROLLEY_TRAVEL_X = DEFAULT_GANTRY_LAYOUT.travelX;
+export const TROLLEY_TRAVEL_MIN_X = DEFAULT_GANTRY_LAYOUT.travelMinX;
+export const TROLLEY_TRAVEL_MAX_X = DEFAULT_GANTRY_LAYOUT.travelMaxX;
 export const GANTRY_TOP_Y = DEFAULT_GANTRY_LAYOUT.topY;
 
 /**
@@ -264,6 +422,33 @@ export function measureStopClearance({
 /** True when the carriage cannot foul a rail end collar. */
 export function trolleyClearsStops(options) {
   return measureStopClearance(options) > 0;
+}
+
+/**
+ * Whether the travel drive sits in the pocket it is supposed to. The gearcase
+ * face is the carriage's end stop by design, so every other part of the drive has
+ * to stay outboard of that face, or the carriage would reach it too.
+ */
+export function measureTravelDriveFit(specs) {
+  const layout = specs ? createGantryGeometry(specs) : DEFAULT_GANTRY_LAYOUT;
+  const drive = layout.travelDrive;
+  const caseTopY = BRIDGE.y + drive.case.y + drive.case.height / 2;
+
+  return {
+    /** How far the motor can stays outboard of the carriage's end stop. */
+    motorSetback: drive.motor.x - drive.motor.radius - drive.innerFaceX,
+    /** Same, for the terminal box on top of the case. */
+    terminalSetback:
+      drive.terminal.x - drive.terminal.width / 2 - drive.innerFaceX,
+    /** The case must reach the driven wheels' axles to drive them. */
+    axleInsideCase: caseTopY - layout.bridgeWheelY,
+    /** And it must not stand proud of the plate it is bolted to. */
+    plateOverhang: drive.case.width / 2 - layout.endPlate.depth / 2,
+    /** Nothing on the drive may set the bridge's Z extent. */
+    depthMargin: layout.halfDepth - drive.halfDepth,
+    /** Clearance under the motor can, which hangs into open air. */
+    motorBottomY: BRIDGE.y + drive.motor.y - drive.motor.length / 2,
+  };
 }
 
 /** Gap between the tie rod's underside and the tallest thing beneath it. */

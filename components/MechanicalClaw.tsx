@@ -58,7 +58,8 @@ import {
 import {
   BRIDGE_TRAVEL_Z,
   TROLLEY,
-  TROLLEY_TRAVEL_X,
+  TROLLEY_TRAVEL_MAX_X,
+  TROLLEY_TRAVEL_MIN_X,
 } from "@/game/gantryGeometry.mjs";
 import GantryMechanism, {
   type AxisCommand,
@@ -90,7 +91,10 @@ const PLUNGER_STROKE =
 const PLUNGER_OPEN_TARGET_Y = CLAW_GEOMETRY.openPlungerY;
 const CLAW_START_Y =
   WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH - CLAW_ATTACHMENT_Y;
-const CLAW_LIMIT_X = TROLLEY_TRAVEL_X;
+// The travel drive's gearcase sits on one end plate, so the carriage stops
+// closer to that end than to the other.
+const CLAW_LIMIT_MIN_X = TROLLEY_TRAVEL_MIN_X;
+const CLAW_LIMIT_MAX_X = TROLLEY_TRAVEL_MAX_X;
 const CLAW_LIMIT_Z = BRIDGE_TRAVEL_Z;
 const FINGER_COUNT = 3;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -1209,7 +1213,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       limits: {
         minimumCableLength: RETRACTED_CABLE_LENGTH,
         maximumCableLength,
-        trolleyLimitX: CLAW_LIMIT_X,
+        trolleyMinX: CLAW_LIMIT_MIN_X,
+        trolleyMaxX: CLAW_LIMIT_MAX_X,
         trolleyLimitZ: CLAW_LIMIT_Z,
         chuteX: CHUTE_X,
         chuteZ: CHUTE_Z,

@@ -80,7 +80,8 @@ export function stepMachine({
   const {
     minimumCableLength,
     maximumCableLength,
-    trolleyLimitX,
+    trolleyMinX,
+    trolleyMaxX,
     trolleyLimitZ,
     chuteX,
     chuteZ,
@@ -150,8 +151,8 @@ export function stepMachine({
     commanded: machine.commandedX,
     desired: desiredX,
     position: trolley.x,
-    minPosition: -trolleyLimitX,
-    maxPosition: trolleyLimitX,
+    minPosition: trolleyMinX,
+    maxPosition: trolleyMaxX,
   });
   const commandedZ = stepAxisCommand({
     ...axis,

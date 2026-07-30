@@ -36,7 +36,8 @@ const SETTINGS = {
 const LIMITS = {
   minimumCableLength: 0.01,
   maximumCableLength: 2.4,
-  trolleyLimitX: 2.32,
+  trolleyMinX: -2.04,
+  trolleyMaxX: 2.32,
   trolleyLimitZ: 1.38,
   chuteX: 2.28,
   chuteZ: 1.18,
@@ -137,7 +138,7 @@ test("the joystick ramps the axis command up to the commanded speed", () => {
   assert.ok(Math.abs(settled.last.driveX - SETTINGS.moveSpeed) < 1e-9);
   assert.equal(settled.last.driveZ, 0);
   assert.ok(settled.trolley.x > 0);
-  assert.ok(settled.trolley.x < LIMITS.trolleyLimitX);
+  assert.ok(settled.trolley.x < LIMITS.trolleyMaxX);
 });
 
 test("the axis command winds down to nothing at the travel limits", () => {
@@ -146,10 +147,29 @@ test("the axis command winds down to nothing at the travel limits", () => {
     input: { x: 1, z: 1 },
   });
 
-  assert.ok(Math.abs(result.trolley.x - LIMITS.trolleyLimitX) < 0.002);
+  assert.ok(Math.abs(result.trolley.x - LIMITS.trolleyMaxX) < 0.002);
   assert.ok(Math.abs(result.trolley.z - LIMITS.trolleyLimitZ) < 0.002);
   assert.ok(Math.abs(result.last.driveX) < 0.05, "arrives without slamming");
   assert.ok(Math.abs(result.last.driveZ) < 0.05);
+});
+
+test("the X limits are not assumed to be mirror images", () => {
+  // The travel drive stands in the carriage's path on its own side, so the two
+  // ends of X travel are different numbers and the axis has to brake onto each.
+  const result = drive(600, {
+    machine: machineIn("aiming"),
+    input: { x: -1, z: 0 },
+  });
+
+  assert.ok(
+    Math.abs(result.trolley.x - LIMITS.trolleyMinX) < 0.002,
+    `stopped at ${result.trolley.x} rather than the drive-side limit`,
+  );
+  assert.ok(Math.abs(result.last.driveX) < 0.05, "arrives without slamming");
+  assert.ok(
+    Math.abs(LIMITS.trolleyMinX) < LIMITS.trolleyMaxX,
+    "the fixture itself has to be asymmetric for this to mean anything",
+  );
 });
 
 test("the joystick is ignored outside the aiming phase", () => {

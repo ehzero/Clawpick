@@ -159,6 +159,26 @@ const PARTS: Part[] = [
     phrase: "상부 Z축 레일의 전후 이동 범위",
   },
   {
+    id: 38,
+    category: "트롤리·승강",
+    name: "브리지 주행 구동부",
+    english: "Bridge travel drive",
+    aliases: ["주행 기어모터", "Z축 구동부", "좌측 구동 박스"],
+    description:
+      "좌측 엔드 플레이트에 고정되어 고정 레일 위의 바퀴를 돌리는 기어드 모터입니다. 브리지 전체를 전후로 움직이는 동력원이며, 기어케이스 내측면이 캐리지의 좌측 기계적 끝단이기도 합니다.",
+    phrase: "좌측 엔드 플레이트의 브리지 주행 구동부",
+  },
+  {
+    id: 39,
+    category: "트롤리·승강",
+    name: "구동 출력 샤프트",
+    english: "Drive output shaft",
+    aliases: ["구동축", "구동륜 축"],
+    description:
+      "기어케이스 출력이 엔드 플레이트를 관통해 좌측 레일 바퀴 2개를 직접 돌리는 굵은 축입니다. 우측 두 바퀴의 얇은 유동 스터브 축과 지름으로 구분합니다.",
+    phrase: "좌측 레일 바퀴를 돌리는 구동 출력 샤프트",
+  },
+  {
     id: 15,
     category: "트롤리·승강",
     name: "트롤리",
@@ -427,6 +447,9 @@ function MachineDiagram() {
 
       <line x1="218" y1="105" x2="401" y2="105" className="diagram-rail" />
       <line x1="282" y1="96" x2="282" y2="124" className="diagram-rail" />
+      {/* Travel drive on the left end of the bridge, and the carriage inboard. */}
+      <rect x="220" y="93" width="28" height="24" rx="4" className="diagram-dark" />
+      <rect x="228" y="117" width="12" height="14" rx="3" className="diagram-metal" />
       <rect x="300" y="93" width="42" height="24" rx="5" className="diagram-dark" />
       <line x1="321" y1="117" x2="321" y2="165" className="diagram-cable" />
       <rect x="306" y="165" width="30" height="38" rx="7" className="diagram-metal" />
@@ -444,7 +467,8 @@ function MachineDiagram() {
         [6, 132, 250, 252, 227],
         [7, 486, 376, 406, 376],
         [8, 126, 320, 176, 320],
-        [13, 124, 105, 218, 105],
+        [13, 124, 105, 270, 105],
+        [38, 124, 68, 224, 93],
         [15, 384, 116, 342, 106],
         [17, 384, 146, 321, 121],
         [18, 382, 166, 321, 151],

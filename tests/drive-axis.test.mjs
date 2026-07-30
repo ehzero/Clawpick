@@ -16,10 +16,12 @@ import {
   BRIDGE_TRAVEL_Z,
   RAIL,
   TROLLEY,
-  TROLLEY_TRAVEL_X,
+  TROLLEY_TRAVEL_MAX_X,
+  TROLLEY_TRAVEL_MIN_X,
   GANTRY_TOP_Y,
   measureCarriageClearance,
   measureTieClearance,
+  measureTravelDriveFit,
   measureWheelFit,
   measureStopClearance,
   trolleyClearsStops,
@@ -28,10 +30,17 @@ import {
 const AXIS = {
   acceleration: 5.2,
   maxSpeed: 1.35,
-  minPosition: -TROLLEY_TRAVEL_X,
-  maxPosition: TROLLEY_TRAVEL_X,
+  minPosition: TROLLEY_TRAVEL_MIN_X,
+  maxPosition: TROLLEY_TRAVEL_MAX_X,
   dt: 1 / 60,
 };
+
+/**
+ * Leftmost column of the shipped prize layout in MachineScene. The travel drive
+ * eats into the carriage's reach on its own side, so this is the line it must
+ * not cross.
+ */
+const LEFTMOST_PRIZE_X = -1.72;
 
 function drive(steps, { desired, position = 0, commanded = 0, ...rest } = {}) {
   let velocity = commanded;
@@ -92,7 +101,7 @@ test("the axis tapers its speed so it can brake before the end of travel", () =>
     ...AXIS,
     commanded: AXIS.maxSpeed,
     desired: AXIS.maxSpeed,
-    position: TROLLEY_TRAVEL_X - 0.05,
+    position: TROLLEY_TRAVEL_MAX_X - 0.05,
   });
   assert.ok(
     nearLimit < AXIS.maxSpeed,
@@ -115,8 +124,8 @@ test("driving into the stop arrives slowly instead of slamming", () => {
   // joint limit in the scene, so a sub-millimetre command overshoot is fine.
   // What matters is that the axis is no longer travelling when it gets there.
   assert.ok(
-    Math.abs(fast.position - TROLLEY_TRAVEL_X) < 0.001,
-    `expected to settle on ${TROLLEY_TRAVEL_X}, reached ${fast.position}`,
+    Math.abs(fast.position - TROLLEY_TRAVEL_MAX_X) < 0.001,
+    `expected to settle on ${TROLLEY_TRAVEL_MAX_X}, reached ${fast.position}`,
   );
   assert.ok(
     Math.abs(fast.velocity) < 0.05,
@@ -128,7 +137,7 @@ test("driving into the stop arrives slowly instead of slamming", () => {
   let position = 0;
   for (let i = 0; i < 600; i += 1) {
     naive = Math.min(AXIS.maxSpeed, naive + AXIS.acceleration * AXIS.dt);
-    position = Math.min(TROLLEY_TRAVEL_X, position + naive * AXIS.dt);
+    position = Math.min(TROLLEY_TRAVEL_MAX_X, position + naive * AXIS.dt);
   }
   assert.ok(
     naive > 1.3,
@@ -139,10 +148,10 @@ test("driving into the stop arrives slowly instead of slamming", () => {
 test("travel-limited speed is zero once there is no travel left", () => {
   assert.equal(
     travelLimitedSpeed({
-      position: TROLLEY_TRAVEL_X,
+      position: TROLLEY_TRAVEL_MAX_X,
       direction: 1,
-      minPosition: -TROLLEY_TRAVEL_X,
-      maxPosition: TROLLEY_TRAVEL_X,
+      minPosition: TROLLEY_TRAVEL_MIN_X,
+      maxPosition: TROLLEY_TRAVEL_MAX_X,
       deceleration: 5.2,
       maxSpeed: 1.35,
     }),
@@ -151,10 +160,10 @@ test("travel-limited speed is zero once there is no travel left", () => {
   // Standing at the limit but driving away from it is unrestricted.
   assert.equal(
     travelLimitedSpeed({
-      position: TROLLEY_TRAVEL_X,
+      position: TROLLEY_TRAVEL_MAX_X,
       direction: -1,
-      minPosition: -TROLLEY_TRAVEL_X,
-      maxPosition: TROLLEY_TRAVEL_X,
+      minPosition: TROLLEY_TRAVEL_MIN_X,
+      maxPosition: TROLLEY_TRAVEL_MAX_X,
       deceleration: 5.2,
       maxSpeed: 1.35,
     }),
@@ -197,7 +206,7 @@ test("the carriage gets close enough to the chute to hand over", () => {
   // Reaching the chute's exact centre is not the requirement — the return phase
   // hands over once the carriage is within CHUTE_ARRIVAL_DISTANCE of it.
   const layout = createGantryGeometry();
-  const errorX = 2.28 - layout.travelX;
+  const errorX = 2.28 - layout.travelMaxX;
   const errorZ = 1.18 - layout.travelZ;
 
   assert.ok(
@@ -209,12 +218,30 @@ test("the carriage gets close enough to the chute to hand over", () => {
 
 test("the carriage stops before the end plate instead of through it", () => {
   const layout = createGantryGeometry();
-  const carriageEdge = layout.travelX + TROLLEY.size / 2;
+  const carriageEdge = layout.travelMaxX + TROLLEY.size / 2;
   const plateInnerFace = layout.endPlateX - layout.endPlate.thickness / 2;
 
   assert.ok(
     carriageEdge <= plateInnerFace + 1e-9,
     `carriage reaches ${carriageEdge}, past the plate face at ${plateInnerFace}`,
+  );
+});
+
+test("the carriage stops before the travel drive on the drive side", () => {
+  const layout = createGantryGeometry();
+  const drive = layout.travelDrive;
+  const carriageEdge = -layout.travelMinX + TROLLEY.size / 2;
+
+  assert.equal(drive.side, -1, "the reference machine drives from the left");
+  assert.ok(
+    carriageEdge <= drive.innerFaceX + 1e-9,
+    `carriage reaches ${carriageEdge}, into the gearcase at ${drive.innerFaceX}`,
+  );
+  // The gearcase reaches further inboard than the plate, so this end of travel
+  // really is shorter. A symmetric limit here would drive through the gearbox.
+  assert.ok(
+    -layout.travelMinX < layout.travelMaxX,
+    "the drive side must be the shorter of the two X limits",
   );
 });
 
@@ -289,10 +316,50 @@ test("editable rod and wheel specs keep every wheel seated", () => {
         );
       }
 
+      // The gearcase face is the carriage's stop on the drive side, so the can
+      // and the terminal box have to stay behind it or the carriage would reach
+      // them instead of the flat face the stop is dimensioned from.
+      const drive = measureTravelDriveFit(specs);
       assert.ok(
-        layout.travelX + TROLLEY.size / 2 <=
+        drive.motorSetback >= 0,
+        `${where}: motor can stands ${-drive.motorSetback} proud of the end stop`,
+      );
+      assert.ok(
+        drive.terminalSetback >= 0,
+        `${where}: terminal box stands ${-drive.terminalSetback} proud`,
+      );
+      assert.ok(
+        drive.axleInsideCase > 0,
+        `${where}: gearcase stops ${-drive.axleInsideCase} below the wheel axles it turns`,
+      );
+      assert.ok(
+        drive.plateOverhang <= 0,
+        `${where}: gearcase overhangs its end plate by ${drive.plateOverhang}`,
+      );
+      assert.ok(
+        drive.depthMargin >= 0,
+        `${where}: the drive sets the bridge depth, costing ${-drive.depthMargin} of Z travel`,
+      );
+      // The can hangs into open air under the bridge; the carriage top is the
+      // nearest thing below it, and the two never share an X.
+      assert.ok(
+        drive.motorBottomY > TROLLEY.y - TROLLEY.size / 2,
+        `${where}: motor can reaches ${drive.motorBottomY}, down past the carriage`,
+      );
+
+      assert.ok(
+        layout.travelMaxX + TROLLEY.size / 2 <=
           layout.endPlateX - layout.endPlate.thickness / 2 + 1e-9,
         `${where}: carriage runs into the end plate`,
+      );
+      assert.ok(
+        -layout.travelMinX + TROLLEY.size / 2 <=
+          layout.travelDrive.innerFaceX + 1e-9,
+        `${where}: carriage runs into the travel gearcase`,
+      );
+      assert.ok(
+        layout.travelMinX < LEFTMOST_PRIZE_X,
+        `${where}: X reach ${layout.travelMinX} cannot centre on the leftmost prize`,
       );
       assert.ok(
         layout.wheelOuterX < CABINET.topTrimHalfWidth,
@@ -303,8 +370,8 @@ test("editable rod and wheel specs keep every wheel seated", () => {
         `${where}: gantry reaches ${layout.topY}, into the ceiling`,
       );
       assert.ok(
-        2.28 - layout.travelX < CHUTE_ARRIVAL_DISTANCE,
-        `${where}: X reach ${layout.travelX} loses the chute`,
+        2.28 - layout.travelMaxX < CHUTE_ARRIVAL_DISTANCE,
+        `${where}: X reach ${layout.travelMaxX} loses the chute`,
       );
       assert.ok(
         1.18 - layout.travelZ < CHUTE_ARRIVAL_DISTANCE,
@@ -356,13 +423,40 @@ test("axis travel is derived from the gantry, not hand-picked", () => {
         (layout.stopZ - RAIL.stopLength / 2 - BRIDGE_HALF_DEPTH),
     ) < 1e-9,
   );
-  // X is the carriage meeting the end plate.
+  // X is the carriage meeting the end plate one way…
   assert.ok(
     Math.abs(
-      TROLLEY_TRAVEL_X -
+      TROLLEY_TRAVEL_MAX_X -
         (layout.endPlateX -
           layout.endPlate.thickness / 2 -
           TROLLEY.size / 2),
     ) < 1e-9,
+  );
+  // …and the travel gearcase the other.
+  assert.ok(
+    Math.abs(
+      TROLLEY_TRAVEL_MIN_X +
+        (layout.travelDrive.innerFaceX - TROLLEY.size / 2),
+    ) < 1e-9,
+  );
+});
+
+test("the bridge mass is split across every collider that carries it", () => {
+  const share = BRIDGE.massShare;
+  // Two rods, one tie, two plates, one gearcase, one motor.
+  const total =
+    share.rod * 2 +
+    share.tie +
+    share.endPlate * 2 +
+    share.driveCase +
+    share.driveMotor;
+
+  assert.ok(
+    Math.abs(total - 1) < 1e-9,
+    `shares sum to ${total}, so the bridge does not weigh BRIDGE.mass`,
+  );
+  assert.ok(
+    share.driveCase + share.driveMotor > share.endPlate * 2,
+    "a real gearmotor outweighs the plates it hangs off",
   );
 });

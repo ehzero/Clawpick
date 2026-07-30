@@ -132,7 +132,8 @@ test("the manual and automatic winches stop at the same two limits", () => {
   const limits = {
     minimumCableLength: 0.01,
     maximumCableLength: 2.4,
-    trolleyLimitX: 2.32,
+    trolleyMinX: -2.04,
+    trolleyMaxX: 2.32,
     trolleyLimitZ: 1.38,
     chuteX: 2.28,
     chuteZ: 1.18,

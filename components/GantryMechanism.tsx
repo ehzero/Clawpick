@@ -51,6 +51,18 @@ const ALONG_Z: [number, number, number] = [Math.PI / 2, 0, 0];
 
 const STEEL = { color: "#c9ccc7", metalness: 0.94, roughness: 0.14 } as const;
 const DARK_STEEL = { color: "#6f7370", metalness: 0.86, roughness: 0.28 } as const;
+/** Cast alloy gearcase, a shade duller than the polished rod stock. */
+const CAST_ALLOY = {
+  color: "#a7aba5",
+  metalness: 0.72,
+  roughness: 0.38,
+} as const;
+/** Painted motor can. */
+const MOTOR_SHELL = {
+  color: "#2c2f2b",
+  metalness: 0.64,
+  roughness: 0.36,
+} as const;
 /** White nylon, as in the real machine. The flange is a shade off so the
  *  groove still reads at a distance. */
 const NYLON = { color: "#f4f2ec", metalness: 0.04, roughness: 0.52 } as const;
@@ -120,6 +132,126 @@ function GroovedWheel({
             ]}
           />
           <meshStandardMaterial {...NYLON_FLANGE} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * The bridge travel drive: a geared motor bolted to one end plate, turning the
+ * two rail wheels on that side so the whole bridge walks along the fixed side
+ * rods. Everything here is local to the bridge body, so it rides with it.
+ *
+ * Its gearcase is also the carriage's mechanical end stop on this side, which is
+ * why `layout.travelMinX` and `layout.travelMaxX` are not mirror images.
+ */
+function TravelDrive({ layout }: { layout: GantryLayout }) {
+  const drive = layout.travelDrive;
+  const { side } = drive;
+  const finSpacing = drive.motor.length / (drive.motor.fins + 1);
+
+  return (
+    <group name="gantry-travel-drive" position={[side * drive.case.x, 0, 0]}>
+      {/* Gearcase. The three bridge rods run into it and end there, so it reads
+          as the housing they are clamped into rather than a stuck-on block. */}
+      <mesh castShadow position={[0, drive.case.y, 0]}>
+        <boxGeometry
+          args={[drive.case.depth, drive.case.height, drive.case.width]}
+        />
+        <meshStandardMaterial {...CAST_ALLOY} />
+      </mesh>
+      {/* Bolted flange against the plate, and a raised inspection cover. */}
+      <mesh
+        castShadow
+        position={[side * (drive.case.depth / 2 - 0.012), drive.case.y, 0]}
+      >
+        <boxGeometry args={[0.024, drive.case.height + 0.03, drive.case.width + 0.03]} />
+        <meshStandardMaterial {...DARK_STEEL} />
+      </mesh>
+      <mesh
+        castShadow
+        position={[0, drive.cover.y, -drive.cover.z]}
+      >
+        <boxGeometry
+          args={[drive.cover.width, drive.cover.height, drive.cover.thickness]}
+        />
+        <meshStandardMaterial {...DARK_STEEL} />
+      </mesh>
+
+      {/* Motor can, hanging under the case in the one column of free air below
+          the bridge that the carriage never sweeps. */}
+      <mesh castShadow position={[0, drive.motor.y, 0]}>
+        <cylinderGeometry
+          args={[drive.motor.radius, drive.motor.radius, drive.motor.length, 20]}
+        />
+        <meshStandardMaterial {...MOTOR_SHELL} />
+      </mesh>
+      {Array.from({ length: drive.motor.fins }, (_, index) => (
+        <mesh
+          key={index}
+          castShadow
+          position={[
+            0,
+            drive.motor.y +
+              drive.motor.length / 2 -
+              finSpacing * (index + 1),
+            0,
+          ]}
+        >
+          <cylinderGeometry
+            args={[
+              drive.motor.radius + 0.012,
+              drive.motor.radius + 0.012,
+              0.014,
+              20,
+            ]}
+          />
+          <meshStandardMaterial {...MOTOR_SHELL} />
+        </mesh>
+      ))}
+      <mesh
+        castShadow
+        position={[0, drive.motor.y - drive.motor.length / 2 - 0.008, 0]}
+      >
+        <cylinderGeometry
+          args={[drive.motor.radius * 0.72, drive.motor.radius * 0.72, 0.016, 16]}
+        />
+        <meshStandardMaterial {...DARK_STEEL} />
+      </mesh>
+
+      {/* Terminal box and its cable glands. The drive's own wiring is not
+          modelled beyond the glands it leaves through. */}
+      <mesh castShadow position={[0, drive.terminal.y, 0]}>
+        <boxGeometry
+          args={[
+            drive.terminal.width,
+            drive.terminal.height,
+            drive.terminal.depth,
+          ]}
+        />
+        <meshStandardMaterial {...DARK_STEEL} />
+      </mesh>
+      {[-1, 1].map((offset) => (
+        <mesh
+          key={offset}
+          castShadow
+          position={[
+            (offset * drive.gland.spacing) / 2,
+            drive.gland.y,
+            -(drive.gland.z + drive.gland.length / 2),
+          ]}
+          rotation={ALONG_Z}
+        >
+          <cylinderGeometry
+            args={[
+              drive.gland.radius,
+              drive.gland.radius,
+              drive.gland.length,
+              10,
+            ]}
+          />
+          <meshStandardMaterial {...MOTOR_SHELL} />
         </mesh>
       ))}
     </group>
@@ -229,7 +361,9 @@ function GantryAxes({
       [0, TROLLEY.y - BRIDGE.y, 0],
       [0, 0, 0],
       [1, 0, 0],
-      [-layout.travelX, layout.travelX],
+      // Not symmetric: one end of travel is an end plate, the other is the
+      // travel drive's gearcase standing in the carriage's path.
+      [layout.travelMinX, layout.travelMaxX],
     ],
   );
 
@@ -247,7 +381,7 @@ function GantryAxes({
     if (trolley) {
       trolley.configureMotorModel(MotorModel.ForceBased);
       trolley.configureMotorVelocity(command.current.x, stiffness);
-      trolley.setLimits(-layout.travelX, layout.travelX);
+      trolley.setLimits(layout.travelMinX, layout.travelMaxX);
     }
   });
 
@@ -270,12 +404,13 @@ export default function GantryMechanism({
   const axleX = SIDES.map((side) => side * layout.trolleyWheelSpacingX);
   const wheelZ = SIDES.map((side) => side * BRIDGE.wheelZ);
 
-  // Heights local to each body.
+  // Heights local to each body. The plate's own height and centre come from the
+  // layout because the travel drive is dimensioned against the same two values.
   const tieLocalY = layout.tieY - BRIDGE.y;
-  const plateBottom = -layout.rodRadius - 0.02;
-  const plateTop = tieLocalY + layout.rodRadius + 0.02;
-  const plateHeight = plateTop - plateBottom;
-  const plateCentre = plateBottom + plateHeight / 2;
+  const plateHeight = layout.plateHeight;
+  const plateCentre = layout.plateLocalY;
+  const drive = layout.travelDrive;
+  const share = BRIDGE.massShare;
 
   const trolleyAxleY = layout.trolleyWheelY - TROLLEY.y;
   const carriageTop = TROLLEY.size / 2;
@@ -307,7 +442,7 @@ export default function GantryMechanism({
             args={[layout.rodSpan / 2, layout.rodRadius]}
             position={[0, 0, z]}
             rotation={ALONG_X}
-            mass={BRIDGE.mass * 0.35}
+            mass={BRIDGE.mass * share.rod}
             friction={0.2}
             restitution={0}
             collisionGroups={GANTRY_COLLISION_GROUPS}
@@ -317,7 +452,7 @@ export default function GantryMechanism({
           args={[layout.rodSpan / 2, layout.rodRadius]}
           position={[0, tieLocalY, 0]}
           rotation={ALONG_X}
-          mass={BRIDGE.mass * 0.15}
+          mass={BRIDGE.mass * share.tie}
           friction={0.2}
           restitution={0}
           collisionGroups={GANTRY_COLLISION_GROUPS}
@@ -331,12 +466,34 @@ export default function GantryMechanism({
               layout.endPlate.depth / 2,
             ]}
             position={[side * layout.endPlateX, plateCentre, 0]}
-            mass={BRIDGE.mass * 0.075}
+            mass={BRIDGE.mass * share.endPlate}
             friction={0.2}
             restitution={0}
             collisionGroups={GANTRY_COLLISION_GROUPS}
           />
         ))}
+        {/* The travel gearmotor is a third of the bridge's mass and hangs off one
+            end, so the Z axis really is driving an off-centre load. */}
+        <CuboidCollider
+          args={[
+            drive.case.depth / 2,
+            drive.case.height / 2,
+            drive.case.width / 2,
+          ]}
+          position={[drive.side * drive.case.x, drive.case.y, 0]}
+          mass={BRIDGE.mass * share.driveCase}
+          friction={0.2}
+          restitution={0}
+          collisionGroups={GANTRY_COLLISION_GROUPS}
+        />
+        <CylinderCollider
+          args={[drive.motor.length / 2, drive.motor.radius]}
+          position={[drive.side * drive.motor.x, drive.motor.y, 0]}
+          mass={BRIDGE.mass * share.driveMotor}
+          friction={0.2}
+          restitution={0}
+          collisionGroups={GANTRY_COLLISION_GROUPS}
+        />
 
         <group name="gantry-bridge-render-meshes" visible={!debug}>
           {rodZ.map((z) => (
@@ -379,8 +536,9 @@ export default function GantryMechanism({
                 <meshStandardMaterial {...DARK_STEEL} />
               </mesh>
               {/* Front wheel fore, rear wheel aft: the Z spread between them is
-                  the bridge's anti-tip base. Each hangs off a stub axle
-                  projecting outboard from the plate face. */}
+                  the bridge's anti-tip base. On the idle plate each wheel hangs
+                  off a thin stub axle; on the driven plate the same shafts are
+                  the gearcase's outputs, so they are visibly heavier. */}
               {wheelZ.map((z) => (
                 <group key={z}>
                   <mesh
@@ -394,8 +552,12 @@ export default function GantryMechanism({
                   >
                     <cylinderGeometry
                       args={[
-                        0.016,
-                        0.016,
+                        side === drive.side
+                          ? drive.shaftRadius
+                          : layout.stubAxleRadius,
+                        side === drive.side
+                          ? drive.shaftRadius
+                          : layout.stubAxleRadius,
                         layout.wheel.width + 0.03,
                         12,
                       ]}
@@ -411,6 +573,8 @@ export default function GantryMechanism({
               ))}
             </group>
           ))}
+
+          <TravelDrive layout={layout} />
         </group>
       </RigidBody>
 
