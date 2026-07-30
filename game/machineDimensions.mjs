@@ -22,9 +22,9 @@ export const CABINET = Object.freeze({
   glassHalfDepth: 1.7925,
   /** Inner edge of the top side trim, which the rail wheels pass beside. */
   topTrimHalfWidth: 2.78,
-  /** Inner face of the side and end wall colliders. */
-  wallHalfWidth: 2.88,
-  wallHalfDepth: 1.78,
+  // The wall colliders used to carry their own half-extents here, which let them
+  // drift from the glass. They are derived from the glass outline now — see
+  // `createGlassWallColliders` in `glassShell.mjs`.
 });
 
 /** Solver budget for the closed-loop finger linkage. */

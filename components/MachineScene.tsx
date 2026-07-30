@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import * as THREE from "three";
 import { RoundedBox, Text } from "@react-three/drei";
 import {
   CuboidCollider,
@@ -18,6 +19,11 @@ import {
   PRIZE_DECK_COLLIDER_HALF_HEIGHT,
   SOLVER_ITERATIONS,
 } from "@/game/machineDimensions.mjs";
+import {
+  GLASS,
+  createGlassShellOutline,
+  createGlassWallColliders,
+} from "@/game/glassShell.mjs";
 import { useGameStore } from "@/game/store";
 
 const PRIZE_POSITIONS: Array<[number, number, number]> = Array.from(
@@ -69,6 +75,7 @@ function CabinetGlassMaterial() {
       ior={1.48}
       metalness={0}
       depthWrite={false}
+      side={THREE.DoubleSide}
     />
   );
 }
@@ -144,34 +151,76 @@ function PrizeDeckVisuals() {
   );
 }
 
+/**
+ * One closed rectangular tunnel of glass instead of four loose panels: the
+ * outline is extruded upward with a hole through it, so the corners meet and the
+ * whole shell is a single transparent object with nothing to sort against.
+ */
+function useGlassShellGeometry() {
+  const geometry = useMemo(() => {
+    const outline = createGlassShellOutline();
+    const toPath = (points: ReadonlyArray<ReadonlyArray<number>>) => {
+      const path = new THREE.Path();
+      path.moveTo(points[0][0], points[0][1]);
+      for (const [u, v] of points.slice(1)) path.lineTo(u, v);
+      path.closePath();
+      return path;
+    };
+
+    const shape = new THREE.Shape(
+      (outline.outer as ReadonlyArray<ReadonlyArray<number>>).map(
+        ([u, v]) => new THREE.Vector2(u, v),
+      ),
+    );
+    shape.holes.push(toPath(outline.inner));
+
+    const shell = new THREE.ExtrudeGeometry(shape, {
+      depth: GLASS.height,
+      bevelEnabled: false,
+      steps: 1,
+    });
+    // Extrusion runs along +Z, so stand it up and drop it onto the deck.
+    shell.rotateX(-Math.PI / 2);
+    shell.translate(0, GLASS.bottomY, 0);
+    shell.computeVertexNormals();
+    return shell;
+  }, []);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return geometry;
+}
+
 function GlassEnclosure() {
+  const geometry = useGlassShellGeometry();
+
   return (
     <group name="tempered-glass-enclosure">
-      <mesh
-        name="undecorated-front-glass"
-        position={[0, 2.12, 1.805]}
-        renderOrder={4}
-      >
-        <boxGeometry args={[5.52, 3.78, 0.025]} />
-        <CabinetGlassMaterial />
-      </mesh>
-      <mesh position={[-2.845, 2.12, 0]} renderOrder={3}>
-        <boxGeometry args={[0.025, 3.78, 3.42]} />
-        <CabinetGlassMaterial />
-      </mesh>
-      <mesh position={[2.845, 2.12, 0]} renderOrder={3}>
-        <boxGeometry args={[0.025, 3.78, 3.42]} />
-        <CabinetGlassMaterial />
-      </mesh>
-      <mesh
-        name="undecorated-rear-glass"
-        position={[0, 2.12, -1.805]}
-        renderOrder={3}
-      >
-        <boxGeometry args={[5.52, 3.78, 0.025]} />
+      <mesh name="glass-shell-tunnel" renderOrder={4}>
+        <primitive object={geometry} attach="geometry" />
         <CabinetGlassMaterial />
       </mesh>
     </group>
+  );
+}
+
+/**
+ * The barrier that keeps prizes inside, derived from the same outline the glass
+ * mesh is extruded from. Previously these were hand-written literals, which had
+ * drifted: the sides stopped 47.5 mm outside the pane, so a prize sank into the
+ * glass before it stopped, and the front and back stopped 12.5 mm inside it, so a
+ * prize hung short of glass it never touched.
+ */
+function GlassWallColliders() {
+  return (
+    <>
+      {createGlassWallColliders().map(({ halfExtents, position }, index) => (
+        <CuboidCollider
+          key={index}
+          args={halfExtents as [number, number, number]}
+          position={position as [number, number, number]}
+        />
+      ))}
+    </>
   );
 }
 
@@ -574,10 +623,7 @@ function Cabinet({ showVisuals }: { showVisuals: boolean }) {
           position={[0, PRIZE_DECK_COLLIDER_CENTER_Y, 0]}
           friction={1.1}
         />
-        <CuboidCollider args={[0.12, 2.25, 1.9]} position={[-3, 2.1, 0]} />
-        <CuboidCollider args={[0.12, 2.25, 1.9]} position={[3, 2.1, 0]} />
-        <CuboidCollider args={[3, 2.25, 0.12]} position={[0, 2.1, -1.9]} />
-        <CuboidCollider args={[3, 2.25, 0.12]} position={[0, 2.1, 1.9]} />
+        <GlassWallColliders />
         <CuboidCollider args={[3, 0.12, 1.9]} position={[0, 4.32, 0]} />
         <PrizeChuteGuideColliders />
         <CuboidCollider

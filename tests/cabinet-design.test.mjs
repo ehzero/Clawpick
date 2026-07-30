@@ -65,9 +65,14 @@ test("all four enclosure sides stay glass without corner pillars", async () => {
     "utf8",
   );
 
-  assert.match(source, /name="undecorated-front-glass"/);
-  assert.match(source, /name="undecorated-rear-glass"/);
-  assert.equal(source.match(/<CabinetGlassMaterial \/>/g)?.length, 4);
+  // One extruded tunnel now, so all four sides come from a single closed
+  // outline with a hole through it — see tests/glass-shell.test.mjs for the
+  // geometry itself.
+  assert.match(source, /name="glass-shell-tunnel"/);
+  assert.match(source, /new THREE\.ExtrudeGeometry/);
+  assert.match(source, /shape\.holes\.push/);
+  assert.equal(source.match(/<CabinetGlassMaterial \/>/g)?.length, 1);
+  assert.doesNotMatch(source, /undecorated-front-glass|undecorated-rear-glass/);
   assert.doesNotMatch(source, /MeshReflectorMaterial/);
   assert.doesNotMatch(source, /rear-interior-mirror/);
   assert.doesNotMatch(source, /rear-interior-panel/);
@@ -86,9 +91,14 @@ test("detailed cabinet visuals keep the simple physics shell", async () => {
     source,
     /<RigidBody type="fixed" colliders=\{false\}>[\s\S]*?<CuboidCollider args=\{\[3, 0\.12, 1\.9\]\}/,
   );
-  assert.match(
+  // The walls are still plain cuboids on that one fixed body, but their extents
+  // come from the glass outline now. Hand-written wall literals are what let the
+  // barrier drift away from the pane, so the scene must not carry any.
+  assert.match(source, /<GlassWallColliders \/>/);
+  assert.doesNotMatch(
     source,
-    /<CuboidCollider args=\{\[3, 2\.25, 0\.12\]\} position=\{\[0, 2\.1, 1\.9\]\} \/>/,
+    /<CuboidCollider args=\{\[[\d.]+, 2\.25, [\d.]+\]\}/,
+    "wall extents belong to createGlassWallColliders, not to the scene",
   );
   assert.match(
     source,
