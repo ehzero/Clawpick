@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ChevronDown,
   Download,
@@ -18,10 +18,7 @@ import {
   normalizePhysicsSettings,
   useGameStore,
 } from "@/game/store";
-import {
-  migratePersistedSettings,
-  SETTINGS_STORAGE_VERSION,
-} from "@/game/settingsMigration.mjs";
+import { SETTINGS_STORAGE_VERSION } from "@/game/settingsMigration.mjs";
 import type { PhysicsSettings } from "@/game/types";
 
 interface SliderProps {
@@ -342,33 +339,6 @@ export function TuningPanel() {
   const replaceSettings = useGameStore((state) => state.replaceSettings);
   const resetSettings = useGameStore((state) => state.resetSettings);
   const record = useGameStore((state) => state.record);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("clawpick-settings");
-    if (!saved) return;
-    try {
-      const version = Number(
-        localStorage.getItem("clawpick-settings-version") ?? 0,
-      );
-      replaceSettings(
-        migratePersistedSettings(
-          normalizePhysicsSettings(JSON.parse(saved)),
-          version,
-        ),
-      );
-    } catch {
-      localStorage.removeItem("clawpick-settings");
-      localStorage.removeItem("clawpick-settings-version");
-    }
-  }, [replaceSettings]);
-
-  useEffect(() => {
-    localStorage.setItem("clawpick-settings", JSON.stringify(settings));
-    localStorage.setItem(
-      "clawpick-settings-version",
-      String(SETTINGS_STORAGE_VERSION),
-    );
-  }, [settings]);
 
   const importPreset = async (file?: File) => {
     if (!file) return;

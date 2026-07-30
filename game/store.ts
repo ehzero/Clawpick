@@ -1,6 +1,15 @@
 "use client";
 
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
+import { persist, type PersistStorage } from "zustand/middleware";
+import {
+  migratePersistedSettings,
+  SETTINGS_STORAGE_VERSION,
+} from "./settingsMigration.mjs";
+import {
+  createSettingsStorage,
+  SETTINGS_STORAGE_KEY,
+} from "./settingsStorage.mjs";
 import type {
   GamePhase,
   GameResult,
@@ -185,7 +194,15 @@ function event(
   return { at: Math.max(0, Date.now() - startedAt), type, data };
 }
 
-export const useGameStore = create<GameStore>((set, get) => ({
+interface PersistedSettings {
+  settings: PhysicsSettings;
+}
+
+const settingsStorage = createSettingsStorage(() =>
+  typeof localStorage === "undefined" ? null : localStorage,
+) as PersistStorage<PersistedSettings>;
+
+const createGameState: StateCreator<GameStore> = (set, get) => ({
   phase: "aiming",
   result: null,
   input: { x: 0, z: 0 },
@@ -383,4 +400,33 @@ export const useGameStore = create<GameStore>((set, get) => ({
       ].slice(-400),
     });
   },
-}));
+});
+
+export const useGameStore = create<GameStore>()(
+  persist(createGameState, {
+    name: SETTINGS_STORAGE_KEY,
+    version: SETTINGS_STORAGE_VERSION,
+    storage: settingsStorage,
+    // Only the tuning is worth keeping; phase, metrics and the session log are
+    // all per-round state.
+    partialize: (state) => ({ settings: state.settings }),
+    // Rehydration is deferred to the client so the server-rendered sliders and
+    // the first client render agree. ClawLab kicks it off after mounting.
+    skipHydration: true,
+    migrate: (persisted, version) =>
+      ({
+        settings: migratePersistedSettings(
+          normalizePhysicsSettings(
+            (persisted as Partial<PersistedSettings> | undefined)?.settings,
+          ),
+          version,
+        ),
+      }) as PersistedSettings,
+    merge: (persisted, current) => ({
+      ...current,
+      settings: normalizePhysicsSettings(
+        (persisted as Partial<PersistedSettings> | undefined)?.settings,
+      ),
+    }),
+  }),
+);

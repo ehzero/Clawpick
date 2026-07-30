@@ -11,7 +11,7 @@ import {
   TimerReset,
   XCircle,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import PartsGlossaryModal from "@/app/PartsGlossaryModal";
 import GameCanvas from "@/components/GameCanvas";
 import { Controls } from "@/components/Controls";
@@ -60,6 +60,12 @@ function exportSession() {
 }
 
 export default function ClawLab() {
+  // The tuning store persists with skipHydration so the server HTML and the
+  // first client render agree; restore the saved preset once mounted.
+  useEffect(() => {
+    void useGameStore.persist.rehydrate();
+  }, []);
+
   const [partsOpen, setPartsOpen] = useState(false);
   const [inspectorMode, setInspectorMode] =
     useState<InspectorMode>("physics");
