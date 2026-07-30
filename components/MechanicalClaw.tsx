@@ -56,20 +56,33 @@ import {
   PRIZE_DECK_FLOOR_Y,
 } from "@/game/machineDimensions.mjs";
 import {
+  BRIDGE_TRAVEL_Z,
+  TROLLEY,
+  TROLLEY_TRAVEL_X,
+} from "@/game/gantryGeometry.mjs";
+import GantryMechanism, {
+  type AxisCommand,
+} from "@/components/GantryMechanism";
+import {
   createMachineState,
   stepMachine,
 } from "@/game/machineStep.mjs";
 import { useGameStore } from "@/game/store";
 import type { ClawPartSpecs } from "@/game/types";
 
-export const TROLLEY_Y = 4.02;
+export const TROLLEY_Y = TROLLEY.y;
 export const CHUTE_X = 2.28;
 export const CHUTE_Z = 1.18;
-
-const WIRE_GUIDE_CENTER_Y = TROLLEY_Y - 0.18;
 const CLAW_ATTACHMENT_Y = 0.4;
 const WIRE_GUIDE_RADIUS = 0.22;
 const WIRE_GUIDE_HEIGHT = 0.08;
+/**
+ * The wire guide is bolted to the underside of the carriage, so its offset is
+ * local to the trolley and sits the guide clear of the carriage body: the wire
+ * has to leave the machine below the box rather than from inside it.
+ */
+const WIRE_GUIDE_OFFSET_Y = -(TROLLEY.size / 2) - WIRE_GUIDE_HEIGHT / 2;
+const WIRE_GUIDE_CENTER_Y = TROLLEY_Y + WIRE_GUIDE_OFFSET_Y;
 const WIRE_EXIT_LOCAL_Y = -WIRE_GUIDE_HEIGHT / 2;
 const WIRE_EXIT_Y = WIRE_GUIDE_CENTER_Y + WIRE_EXIT_LOCAL_Y;
 const PLUNGER_STROKE =
@@ -77,8 +90,8 @@ const PLUNGER_STROKE =
 const PLUNGER_OPEN_TARGET_Y = CLAW_GEOMETRY.openPlungerY;
 const CLAW_START_Y =
   WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH - CLAW_ATTACHMENT_Y;
-const CLAW_LIMIT_X = 2.32;
-const CLAW_LIMIT_Z = 1.38;
+const CLAW_LIMIT_X = TROLLEY_TRAVEL_X;
+const CLAW_LIMIT_Z = BRIDGE_TRAVEL_Z;
 const FINGER_COUNT = 3;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const BODY_INITIAL_POSITION: [number, number, number] = [
@@ -103,7 +116,6 @@ const UMBILICAL_BODY_CLEARANCE = 0.008;
 const HOUSING_TOP_COLUMN_CENTER_Y = 0.29;
 const HOUSING_TOP_COLUMN_CENTER_RADIUS = (0.17 + 0.205) / 2;
 const HOUSING_COLLIDER_CENTER_Y = 0.09;
-const TROLLEY_BODY_SIZE = 0.64;
 const HOUSING_COLLARS = [
   { y: 0.4, radius: 0.18, height: 0.022 },
   { y: 0.195, radius: 0.232, height: 0.028 },
@@ -1001,97 +1013,10 @@ function ClawClosedLinkage({
   );
 }
 
-function TrolleyMechanism({
-  gantryRef,
-  trolleyRef,
-  drumRef,
-}: {
-  gantryRef: RefObject<THREE.Group | null>;
-  trolleyRef: RefObject<THREE.Group | null>;
-  drumRef: RefObject<THREE.Mesh | null>;
-}) {
-  return (
-    <>
-      <group ref={gantryRef}>
-        <mesh castShadow position={[0, 4.02, 0]}>
-          <boxGeometry args={[5.35, 0.12, 0.15]} />
-          <meshStandardMaterial color="#d8d8d2" metalness={0.88} roughness={0.2} />
-        </mesh>
-        <mesh castShadow position={[0, 3.91, 0]}>
-          <boxGeometry args={[5.1, 0.08, 0.08]} />
-          <meshStandardMaterial color="#555751" metalness={0.82} roughness={0.3} />
-        </mesh>
-      </group>
-
-      <group ref={trolleyRef}>
-        <mesh
-          castShadow
-          position={[0, 4.02, 0]}
-          name="trolley-body-cube"
-        >
-          <boxGeometry
-            args={[
-              TROLLEY_BODY_SIZE,
-              TROLLEY_BODY_SIZE,
-              TROLLEY_BODY_SIZE,
-            ]}
-          />
-          <meshStandardMaterial color="#242724" metalness={0.68} roughness={0.3} />
-        </mesh>
-        <mesh castShadow position={[0, 4.03, 0.326]}>
-          <boxGeometry args={[0.72, 0.22, 0.035]} />
-          <meshStandardMaterial color="#111311" metalness={0.35} roughness={0.48} />
-        </mesh>
-        <mesh castShadow position={[-0.16, 4.16, 0]}>
-          <boxGeometry args={[0.24, 0.2, 0.34]} />
-          <meshStandardMaterial color="#353733" metalness={0.72} roughness={0.3} />
-        </mesh>
-        <mesh
-          ref={drumRef}
-          castShadow
-          position={[0.08, 4.03, 0]}
-          rotation={[Math.PI / 2, 0, 0]}
-        >
-          <cylinderGeometry args={[0.13, 0.13, 0.26, 18]} />
-          <meshStandardMaterial color="#d5b76f" metalness={0.85} roughness={0.22} />
-        </mesh>
-      </group>
-    </>
-  );
-}
-
-export function OverheadRails({
-  showVisuals = true,
-}: {
-  showVisuals?: boolean;
-}) {
-  return (
-    <group name="overhead-rail-render-meshes" visible={showVisuals}>
-      {[-2.56, 2.56].map((x) => (
-        <group key={x}>
-          <mesh castShadow position={[x, 4.02, 0]}>
-            <boxGeometry args={[0.12, 0.14, 3.35]} />
-            <meshStandardMaterial color="#c7c9c4" metalness={0.9} roughness={0.18} />
-          </mesh>
-          <mesh castShadow position={[x, 3.94, 0]}>
-            <boxGeometry args={[0.2, 0.07, 3.42]} />
-            <meshStandardMaterial color="#343633" metalness={0.75} roughness={0.32} />
-          </mesh>
-          {[-1.64, 1.64].map((z) => (
-            <mesh key={z} castShadow position={[x, 4.01, z]}>
-              <boxGeometry args={[0.28, 0.22, 0.16]} />
-              <meshStandardMaterial color="#555650" metalness={0.65} roughness={0.36} />
-            </mesh>
-          ))}
-        </group>
-      ))}
-    </group>
-  );
-}
-
 export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const { world, rapier } = useRapier();
-  const anchorRef = useRef<RapierRigidBody>(null);
+  const bridgeRef = useRef<RapierRigidBody>(null);
+  const trolleyRef = useRef<RapierRigidBody>(null);
   const housingRef = useRef<RapierRigidBody>(null);
   const plungerColliderRef = useRef<RapierRigidBody>(null);
   const rockerColliderRefs = [
@@ -1106,15 +1031,14 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   ];
   // Counted for the HUD, so adding a linkage body keeps the tally honest.
   const clawBodyRefs = [
-    anchorRef,
+    bridgeRef,
+    trolleyRef,
     housingRef,
     plungerColliderRef,
     ...rockerColliderRefs,
     ...fingerColliderRefs,
   ];
   const cableRef = useRef<THREE.Mesh>(null);
-  const gantryRef = useRef<THREE.Group>(null);
-  const trolleyRef = useRef<THREE.Group>(null);
   const drumRef = useRef<THREE.Mesh>(null);
   const umbilicalCurrent = useRef<THREE.Vector3[]>([]);
   const umbilicalPrevious = useRef<THREE.Vector3[]>([]);
@@ -1129,9 +1053,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const plungerY = useRef<number>(CLAW_GEOMETRY.openPlungerY);
   // Everything the pure machine step owns lives in one place.
   const machine = useRef(createMachineState(RETRACTED_CABLE_LENGTH));
-  // The trolley meshes catch up to the simulated trolley within one physics
-  // step, so a display faster than PHYSICS_TIME_STEP still moves smoothly.
-  const visualTrolley = useRef({ x: 0, z: 0 });
   const frameAccumulator = useRef(0);
   const frameCount = useRef(0);
   const minFps = useRef(60);
@@ -1142,7 +1063,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const ropeJointLength = useRef(Number.NaN);
   const cableAnchor = useRef(new THREE.Vector3());
   const cableAttachment = useRef(new THREE.Vector3());
-  const visualAnchor = useRef(new THREE.Vector3());
+  const axisCommand = useRef<AxisCommand>({ x: 0, z: 0 });
   const drumDirection = useRef(0);
   // Brackets world.step() via the before/after step hooks, so the reported
   // figure is the actual simulation cost rather than the render callback.
@@ -1229,9 +1150,9 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   useBeforePhysicsStep(() => {
     stepStartedAt.current = performance.now();
     const housing = housingRef.current;
-    const anchorBody = anchorRef.current;
+    const carriage = trolleyRef.current;
     const plunger = plungerColliderRef.current;
-    if (!housing || !anchorBody) return;
+    if (!housing || !carriage) return;
 
     const state = useGameStore.getState();
     const { settings } = state;
@@ -1264,10 +1185,15 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       : null;
 
     const bodyPosition = housing.translation();
+    // The carriage is a driven body now, so where it is and how fast it moves
+    // are measurements, exactly like the plunger's stroke.
+    const carriagePosition = carriage.translation();
+    const carriageVelocity = carriage.linvel();
+    const wireExitY = carriagePosition.y + WIRE_GUIDE_OFFSET_Y + WIRE_EXIT_LOCAL_Y;
     const actualCableLength = Math.hypot(
-      machine.current.trolley.x - bodyPosition.x,
-      WIRE_EXIT_Y - (bodyPosition.y + CLAW_ATTACHMENT_Y),
-      machine.current.trolley.z - bodyPosition.z,
+      carriagePosition.x - bodyPosition.x,
+      wireExitY - (bodyPosition.y + CLAW_ATTACHMENT_Y),
+      carriagePosition.z - bodyPosition.z,
     );
 
     // --- decide ----------------------------------------------------------
@@ -1293,11 +1219,15 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         closedY: closedTargetY,
         motion: plungerMotion,
       },
+      trolley: { x: carriagePosition.x, z: carriagePosition.z },
       actualCableLength,
       dt: delta,
     });
     machine.current = command.machine;
     plungerY.current = command.plungerTarget;
+    // Handed to the gantry axis motors, which GantryMechanism applies.
+    axisCommand.current.x = command.driveX;
+    axisCommand.current.z = command.driveZ;
     drumDirection.current = command.drumDirection;
 
     if (command.clearManualCableDirection) {
@@ -1348,15 +1278,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       actuatorForce.current = actuator.force;
     }
 
-    // --- apply: trolley and winch ----------------------------------------
-    const trolley = machine.current.trolley;
+    // --- apply: winch ----------------------------------------------------
     const cableLength = machine.current.cableLength;
-    anchorBody.setNextKinematicTranslation({
-      x: trolley.x,
-      y: WIRE_GUIDE_CENTER_Y,
-      z: trolley.z,
-    });
-
     if (
       !ropeJoint.current ||
       Math.abs(ropeJointLength.current - cableLength) > 0.002
@@ -1369,14 +1292,15 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
         world.removeImpulseJoint(previousJoint, true);
       }
       // The Rapier JS binding exposes no length setter on a rope joint, so a
-      // changed winch length means replacing the joint.
+      // changed winch length means replacing the joint. Anchored on the
+      // carriage body, so the claw's weight and swing load the gantry.
       ropeJoint.current = world.createImpulseJoint(
         rapier.JointData.rope(
           cableLength,
-          { x: 0, y: WIRE_EXIT_LOCAL_Y, z: 0 },
+          { x: 0, y: WIRE_GUIDE_OFFSET_Y + WIRE_EXIT_LOCAL_Y, z: 0 },
           { x: 0, y: CLAW_ATTACHMENT_Y, z: 0 },
         ),
-        anchorBody,
+        carriage,
         housing,
         true,
       ) as RopeImpulseJoint;
@@ -1398,9 +1322,9 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     attachment.y += bodyPosition.y;
     attachment.z += bodyPosition.z;
     const anchor = cableAnchor.current.set(
-      trolley.x,
-      WIRE_EXIT_Y,
-      trolley.z,
+      carriagePosition.x,
+      wireExitY,
+      carriagePosition.z,
     );
     const attachmentVelocity = housing.velocityAtPoint(attachment);
     const cableState = measureInextensibleCable({
@@ -1415,9 +1339,9 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       const projectedVelocity = projectInextensibleCableVelocity({
         direction: cableState.direction,
         anchorVelocity: {
-          x: machine.current.trolleyVelocity.x,
-          y: 0,
-          z: machine.current.trolleyVelocity.z,
+          x: carriageVelocity.x,
+          y: carriageVelocity.y,
+          z: carriageVelocity.z,
         },
         bodyLinearVelocity: housing.linvel(),
         attachmentVelocity,
@@ -1451,27 +1375,8 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     frameCount.current += 1;
     if (delta > 0) minFps.current = Math.min(minFps.current, 1 / delta);
 
-    // Catch the trolley meshes up to the simulated trolley within a single
-    // physics step: exact at 60 Hz or below, smoothed on faster displays.
-    const catchUp = Math.min(1, delta / PHYSICS_TIME_STEP);
-    visualTrolley.current.x = THREE.MathUtils.lerp(
-      visualTrolley.current.x,
-      machine.current.trolley.x,
-      catchUp,
-    );
-    visualTrolley.current.z = THREE.MathUtils.lerp(
-      visualTrolley.current.z,
-      machine.current.trolley.z,
-      catchUp,
-    );
-
-    if (gantryRef.current) {
-      gantryRef.current.position.z = visualTrolley.current.z;
-    }
-    if (trolleyRef.current) {
-      trolleyRef.current.position.x = visualTrolley.current.x;
-      trolleyRef.current.position.z = visualTrolley.current.z;
-    }
+    // The carriage and bridge are rigid bodies, so Rapier already interpolates
+    // their meshes for rendering; nothing to drive by hand here any more.
     if (drumRef.current) {
       drumRef.current.rotation.y += drumDirection.current * delta * 5;
     }
@@ -1486,11 +1391,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     );
     setMeshBetween(
       cableRef.current,
-      visualAnchor.current.set(
-        visualTrolley.current.x,
-        WIRE_EXIT_Y,
-        visualTrolley.current.z,
-      ),
+      cableAnchor.current,
       cableAttachment.current,
     );
 
@@ -1505,11 +1406,11 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       clawPartSpecs.powerCableDiameter / 2;
     const trolleyOutwardDirection = new THREE.Vector3(-1, 0, 0);
     const trolleyConnectionInset = cableStrandRadius * 0.35;
+    const carriage = trolleyRef.current?.translation();
     const trolleyConnection = new THREE.Vector3(
-      visualTrolley.current.x -
-        (TROLLEY_BODY_SIZE / 2 - trolleyConnectionInset),
-      TROLLEY_Y,
-      visualTrolley.current.z,
+      (carriage?.x ?? 0) - (TROLLEY.size / 2 - trolleyConnectionInset),
+      carriage?.y ?? TROLLEY_Y,
+      carriage?.z ?? 0,
     );
     const umbilicalTop = trolleyConnection
       .clone()
@@ -1683,56 +1584,51 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
 
   return (
     <>
-      <group name="trolley-render-meshes" visible={!debug}>
-        <TrolleyMechanism
-          gantryRef={gantryRef}
-          trolleyRef={trolleyRef}
-          drumRef={drumRef}
-        />
-      </group>
-      <RigidBody
-        ref={anchorRef}
-        type="kinematicPosition"
-        colliders={false}
-        position={[0, WIRE_GUIDE_CENTER_Y, 0]}
-        name="wire-exit-guide"
+      <GantryMechanism
+        bridgeRef={bridgeRef}
+        trolleyRef={trolleyRef}
+        drumRef={drumRef}
+        command={axisCommand}
       >
-        <group name="wire-exit-guide-render-meshes" visible={!debug}>
-          <mesh castShadow>
-            <cylinderGeometry
-              args={[
-                WIRE_GUIDE_RADIUS,
-                WIRE_GUIDE_RADIUS,
-                WIRE_GUIDE_HEIGHT,
-                24,
-              ]}
-            />
-            <meshStandardMaterial
-              color="#b9bdb9"
-              metalness={0.92}
-              roughness={0.2}
-            />
-          </mesh>
-          <mesh
-            castShadow
-            position={[0, -0.02, 0]}
-            rotation={[Math.PI / 2, 0, 0]}
-          >
-            <torusGeometry args={[0.17, 0.05, 8, 24]} />
-            <meshStandardMaterial
-              color="#2f312d"
-              metalness={0.82}
-              roughness={0.28}
-            />
-          </mesh>
+        {/* The wire exit guide is bolted to the carriage, so it rides with it. */}
+        <group name="wire-exit-guide" position={[0, WIRE_GUIDE_OFFSET_Y, 0]}>
+          <group name="wire-exit-guide-render-meshes" visible={!debug}>
+            <mesh castShadow>
+              <cylinderGeometry
+                args={[
+                  WIRE_GUIDE_RADIUS,
+                  WIRE_GUIDE_RADIUS,
+                  WIRE_GUIDE_HEIGHT,
+                  24,
+                ]}
+              />
+              <meshStandardMaterial
+                color="#b9bdb9"
+                metalness={0.92}
+                roughness={0.2}
+              />
+            </mesh>
+            <mesh
+              castShadow
+              position={[0, -0.02, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+            >
+              <torusGeometry args={[0.17, 0.05, 8, 24]} />
+              <meshStandardMaterial
+                color="#2f312d"
+                metalness={0.82}
+                roughness={0.28}
+              />
+            </mesh>
+          </group>
+          <CylinderCollider
+            args={[WIRE_GUIDE_HEIGHT / 2, WIRE_GUIDE_RADIUS]}
+            friction={0.12}
+            restitution={0}
+            collisionGroups={WIRE_GUIDE_COLLISION_GROUPS}
+          />
         </group>
-        <CylinderCollider
-          args={[WIRE_GUIDE_HEIGHT / 2, WIRE_GUIDE_RADIUS]}
-          friction={0.12}
-          restitution={0}
-          collisionGroups={WIRE_GUIDE_COLLISION_GROUPS}
-        />
-      </RigidBody>
+      </GantryMechanism>
       <group name="cable-render-meshes" visible={!debug}>
         <mesh ref={cableRef} castShadow>
           <cylinderGeometry args={[0.012, 0.012, 1, 10]} />

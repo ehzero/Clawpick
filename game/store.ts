@@ -23,6 +23,8 @@ import type {
 export const DEFAULT_SETTINGS: PhysicsSettings = {
   moveSpeed: 1.35,
   trolleyAcceleration: 5.2,
+  gantryDriveStiffness: 900,
+  gantryCoastRatio: 0.45,
   returnSpeedMultiplier: 0.9,
   returnAccelerationMultiplier: 0.73,
   lowerSpeed: 1.1,
@@ -48,6 +50,10 @@ export const PHYSICS_SETTING_LIMITS: Record<
 > = {
   moveSpeed: { min: 0.4, max: 2.5 },
   trolleyAcceleration: { min: 1, max: 10 },
+  // Low values let the hanging claw visibly drag the gantry; high values model
+  // a stiff geared drive that the pendulum cannot move.
+  gantryDriveStiffness: { min: 40, max: 4000 },
+  gantryCoastRatio: { min: 0.1, max: 1 },
   returnSpeedMultiplier: { min: 0.2, max: 1.2 },
   returnAccelerationMultiplier: { min: 0.2, max: 1.2 },
   lowerSpeed: { min: 0.2, max: 2 },
@@ -104,6 +110,8 @@ export function normalizePhysicsSettings(
   return {
     moveSpeed: read("moveSpeed"),
     trolleyAcceleration: read("trolleyAcceleration"),
+    gantryDriveStiffness: read("gantryDriveStiffness"),
+    gantryCoastRatio: read("gantryCoastRatio"),
     returnSpeedMultiplier: read("returnSpeedMultiplier"),
     returnAccelerationMultiplier: read("returnAccelerationMultiplier"),
     lowerSpeed: read("lowerSpeed"),
@@ -162,6 +170,7 @@ interface GameStore {
   startedAt: number;
   round: number;
   debug: boolean;
+  topCoverHidden: boolean;
   manualPlungerState: ManualPlungerState;
   manualCableDirection: ManualCableDirection;
   setInput: (x: number, z: number) => void;
@@ -178,6 +187,7 @@ interface GameStore {
   resetSettings: () => void;
   updateMetrics: (metrics: Partial<PerformanceMetrics>) => void;
   toggleDebug: () => void;
+  toggleTopCover: () => void;
   setManualPlungerState: (state: ManualPlungerState) => void;
   setManualCableDirection: (direction: ManualCableDirection) => void;
   record: (
@@ -212,6 +222,7 @@ const createGameState: StateCreator<GameStore> = (set, get) => ({
   startedAt: Date.now(),
   round: 1,
   debug: false,
+  topCoverHidden: false,
   manualPlungerState: "open",
   manualCableDirection: null,
 
@@ -352,6 +363,10 @@ const createGameState: StateCreator<GameStore> = (set, get) => ({
     set((state) => ({ metrics: { ...state.metrics, ...metrics } })),
 
   toggleDebug: () => set((state) => ({ debug: !state.debug })),
+
+  // Purely a view toggle, like debug: the marquee hides the gantry from above.
+  toggleTopCover: () =>
+    set((state) => ({ topCoverHidden: !state.topCoverHidden })),
 
   setManualPlungerState: (manualPlungerState) => {
     const state = get();

@@ -10,6 +10,23 @@ export const PRIZE_DECK_COLLIDER_CENTER_Y =
  */
 export const PHYSICS_TIME_STEP = 1 / 60;
 
+/**
+ * Cabinet interior, measured to the faces the gantry has to stay clear of.
+ * Rod lengths are derived from these rather than being dimensioned by hand.
+ * `tests/drive-axis.test.mjs` pins them against the colliders in MachineScene.
+ */
+export const CABINET = Object.freeze({
+  /** Inner face of the side glass. */
+  glassHalfWidth: 2.8325,
+  /** Inner face of the front and rear glass. */
+  glassHalfDepth: 1.7925,
+  /** Inner edge of the top side trim, which the rail wheels pass beside. */
+  topTrimHalfWidth: 2.78,
+  /** Inner face of the side and end wall colliders. */
+  wallHalfWidth: 2.88,
+  wallHalfDepth: 1.78,
+});
+
 /** Solver budget for the closed-loop finger linkage. */
 export const SOLVER_ITERATIONS = 12;
 export const INTERNAL_PGS_ITERATIONS = 2;

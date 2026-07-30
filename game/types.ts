@@ -17,6 +17,10 @@ export type ManualCableDirection = "lower" | "raise" | null;
 export interface PhysicsSettings {
   moveSpeed: number;
   trolleyAcceleration: number;
+  /** Joint-motor damping on the gantry axes: how rigidly the drive holds. */
+  gantryDriveStiffness: number;
+  /** Deceleration when the control is released, relative to driving. */
+  gantryCoastRatio: number;
   returnSpeedMultiplier: number;
   returnAccelerationMultiplier: number;
   lowerSpeed: number;
@@ -55,6 +59,12 @@ export interface ClawPartSpecs {
   fingerLength: number;
   fingerTaperStart: number;
   fingerTipWidthScale: number;
+  rodDiameter: number;
+  wheelGrooveDiameter: number;
+  wheelFlangeDiameter: number;
+  wheelGrooveWidth: number;
+  bridgeRodSpacing: number;
+  trolleyWheelSpacing: number;
 }
 
 export interface PerformanceMetrics {

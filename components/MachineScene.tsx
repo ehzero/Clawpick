@@ -10,11 +10,7 @@ import {
   type RapierRigidBody,
 } from "@react-three/rapier";
 import { Prize } from "./Prize";
-import MechanicalClaw, {
-  CHUTE_X,
-  CHUTE_Z,
-  OverheadRails,
-} from "./MechanicalClaw";
+import MechanicalClaw, { CHUTE_X, CHUTE_Z } from "./MechanicalClaw";
 import {
   INTERNAL_PGS_ITERATIONS,
   PHYSICS_TIME_STEP,
@@ -526,14 +522,18 @@ function LowerServiceCabinet() {
   );
 }
 
-function CabinetVisuals() {
+function CabinetVisuals({ showTopCover }: { showTopCover: boolean }) {
   return (
     <>
       <LowerServiceCabinet />
       <PrizeDeckVisuals />
       <GlassEnclosure />
       <CabinetFrame />
-      <Marquee />
+      {/* The marquee and its light panel roof the cabinet, so looking down at
+          the gantry means taking them off. The ceiling collider stays. */}
+      <group name="illuminated-marquee-group" visible={showTopCover}>
+        <Marquee />
+      </group>
       <ControlFascia />
       <pointLight
         position={[-1.8, 3.65, 0.4]}
@@ -553,6 +553,7 @@ function CabinetVisuals() {
 
 function Cabinet({ showVisuals }: { showVisuals: boolean }) {
   const finish = useGameStore((state) => state.finish);
+  const topCoverHidden = useGameStore((state) => state.topCoverHidden);
 
   const handleWin = (payload: IntersectionEnterPayload) => {
     const id = payload.other.rigidBodyObject?.userData?.prizeId;
@@ -588,7 +589,7 @@ function Cabinet({ showVisuals }: { showVisuals: boolean }) {
       </RigidBody>
 
       <group name="cabinet-render-meshes" visible={showVisuals}>
-        <CabinetVisuals />
+        <CabinetVisuals showTopCover={!topCoverHidden} />
       </group>
     </>
   );
@@ -632,7 +633,6 @@ function SceneContent() {
         debug={debug}
       >
         <Cabinet showVisuals={!debug} />
-        <OverheadRails showVisuals={!debug} />
         {PRIZE_POSITIONS.map((position, index) => (
           <Prize
             key={`${round}-prize-${index}`}

@@ -91,6 +91,17 @@ const CLAW_TUNING_SECTIONS: Array<{
         step: 0.01,
         unit: " ×",
       },
+      {
+        label: "구동축 강성",
+        setting: "gantryDriveStiffness",
+        step: 10,
+      },
+      {
+        label: "관성 주행 비율",
+        setting: "gantryCoastRatio",
+        step: 0.01,
+        unit: " ×",
+      },
     ],
   },
   {

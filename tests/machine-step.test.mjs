@@ -12,6 +12,8 @@ import {
 const SETTINGS = {
   moveSpeed: 1.35,
   trolleyAcceleration: 5.2,
+  gantryDriveStiffness: 900,
+  gantryCoastRatio: 0.45,
   returnSpeedMultiplier: 0.9,
   returnAccelerationMultiplier: 0.73,
   lowerSpeed: 1.1,
@@ -63,6 +65,7 @@ function step(overrides = {}) {
     settings = SETTINGS,
     limits = LIMITS,
     motion = null,
+    trolley = { x: 0, z: 0 },
     actualCableLength,
     dt = FRAME,
   } = overrides;
@@ -77,6 +80,7 @@ function step(overrides = {}) {
     settings,
     limits,
     plunger: { ...PLUNGER, motion },
+    trolley,
     // A perfectly tracking claw by default: the hanging body is exactly as far
     // from the guide as the winch has paid out.
     actualCableLength: actualCableLength ?? machine.cableLength,
@@ -93,49 +97,59 @@ function drive(steps, overrides = {}, { stopOnChange = false } = {}) {
   let machine =
     overrides.machine ?? createMachineState(LIMITS.minimumCableLength);
   let phase = overrides.phase ?? machine.phase;
+  const trolley = { ...(overrides.trolley ?? { x: 0, z: 0 }) };
   let last = null;
   const phases = [phase];
 
   for (let index = 0; index < steps; index += 1) {
-    last = step({ ...overrides, machine, phase });
+    last = step({ ...overrides, machine, phase, trolley });
     machine = last.machine;
+    // Stand in for the axis motors: the carriage actually reaches the commanded
+    // velocity. The scene lets the solver do this against real inertia.
+    trolley.x += last.driveX * FRAME;
+    trolley.z += last.driveZ * FRAME;
     const changed = last.nextPhase !== phase;
     if (changed) phases.push(last.nextPhase);
     phase = last.nextPhase;
     if (changed && stopOnChange) break;
   }
 
-  return { machine, phase, last, phases };
+  return { machine, phase, trolley, last, phases };
 }
 
 function driveUntilChange(steps, overrides = {}) {
   return drive(steps, overrides, { stopOnChange: true });
 }
 
-test("the joystick accelerates the trolley toward the commanded speed", () => {
-  // Half a second: long enough to saturate at moveSpeed, short enough to stay
-  // clear of the travel limit that would zero the velocity again.
-  const { machine } = drive(30, {
+test("the joystick ramps the axis command up to the commanded speed", () => {
+  const single = step({
     machine: machineIn("aiming"),
     input: { x: 1, z: 0 },
   });
+  assert.ok(single.driveX > 0);
+  assert.ok(single.driveX < SETTINGS.moveSpeed, "no instant jump to full speed");
 
-  assert.ok(Math.abs(machine.trolleyVelocity.x - SETTINGS.moveSpeed) < 1e-9);
-  assert.equal(machine.trolleyVelocity.z, 0);
-  assert.ok(machine.trolley.x > 0);
-  assert.ok(machine.trolley.x < LIMITS.trolleyLimitX);
+  // Half a second: enough to saturate, short of the travel limit taper.
+  const settled = drive(30, {
+    machine: machineIn("aiming"),
+    input: { x: 1, z: 0 },
+  });
+  assert.ok(Math.abs(settled.last.driveX - SETTINGS.moveSpeed) < 1e-9);
+  assert.equal(settled.last.driveZ, 0);
+  assert.ok(settled.trolley.x > 0);
+  assert.ok(settled.trolley.x < LIMITS.trolleyLimitX);
 });
 
-test("the trolley stops dead at its travel limits", () => {
-  const { machine } = drive(600, {
+test("the axis command winds down to nothing at the travel limits", () => {
+  const result = drive(600, {
     machine: machineIn("aiming"),
     input: { x: 1, z: 1 },
   });
 
-  assert.equal(machine.trolley.x, LIMITS.trolleyLimitX);
-  assert.equal(machine.trolley.z, LIMITS.trolleyLimitZ);
-  assert.equal(machine.trolleyVelocity.x, 0);
-  assert.equal(machine.trolleyVelocity.z, 0);
+  assert.ok(Math.abs(result.trolley.x - LIMITS.trolleyLimitX) < 0.002);
+  assert.ok(Math.abs(result.trolley.z - LIMITS.trolleyLimitZ) < 0.002);
+  assert.ok(Math.abs(result.last.driveX) < 0.05, "arrives without slamming");
+  assert.ok(Math.abs(result.last.driveZ) < 0.05);
 });
 
 test("the joystick is ignored outside the aiming phase", () => {
@@ -144,8 +158,31 @@ test("the joystick is ignored outside the aiming phase", () => {
     input: { x: 1, z: 1 },
   });
 
-  assert.equal(result.machine.trolleyVelocity.x, 0);
-  assert.equal(result.machine.trolleyVelocity.z, 0);
+  assert.equal(result.driveX, 0);
+  assert.equal(result.driveZ, 0);
+});
+
+test("a released joystick coasts to a stop instead of braking hard", () => {
+  const moving = drive(30, {
+    machine: machineIn("aiming"),
+    input: { x: 1, z: 0 },
+  });
+
+  const braking = step({
+    machine: moving.machine,
+    phase: "aiming",
+    input: { x: 0, z: 0 },
+    settings: { ...SETTINGS, gantryCoastRatio: 1 },
+  });
+  const coasting = step({
+    machine: moving.machine,
+    phase: "aiming",
+    input: { x: 0, z: 0 },
+    settings: { ...SETTINGS, gantryCoastRatio: 0.2 },
+  });
+
+  assert.ok(coasting.driveX > braking.driveX);
+  assert.ok(coasting.driveX < moving.last.driveX);
 });
 
 test("manual lowering pays out cable and releases the button at the stop", () => {
@@ -291,8 +328,8 @@ test("lifting retracts to the stop and then heads for the chute", () => {
   assert.ok(result.last.targetLengthRate <= 0);
 });
 
-test("returning steers to the chute and releases on arrival", () => {
-  const result = driveUntilChange(900, {
+test("returning brakes each axis onto the chute and releases on arrival", () => {
+  const result = driveUntilChange(1200, {
     machine: machineIn("returning"),
     motion: { stroke: CLOSED_STROKE, velocity: 0 },
   });
@@ -300,9 +337,10 @@ test("returning steers to the chute and releases on arrival", () => {
   assert.equal(result.phase, "releasing");
   assert.ok(
     Math.hypot(
-      LIMITS.chuteX - result.machine.trolley.x,
-      LIMITS.chuteZ - result.machine.trolley.z,
+      LIMITS.chuteX - result.trolley.x,
+      LIMITS.chuteZ - result.trolley.z,
     ) < 0.035,
+    `stopped at ${result.trolley.x.toFixed(3)}, ${result.trolley.z.toFixed(3)}`,
   );
 });
 
@@ -402,19 +440,24 @@ test("plunger settling needs both the position and the velocity window", () => {
 test("a full automatic round walks the phases in order", () => {
   let machine = machineIn("descending");
   let phase = "descending";
+  const trolley = { x: 0, z: 0 };
   const seen = [phase];
 
-  for (let index = 0; index < 2000 && phase !== "result"; index += 1) {
+  for (let index = 0; index < 3000 && phase !== "result"; index += 1) {
     // Stand in for the physics: report the plunger already parked at whichever
-    // end stop the current phase commands.
+    // end stop the current phase commands, and let the carriage reach the
+    // commanded axis velocity.
     const closed =
       phase === "closing" || phase === "lifting" || phase === "returning";
     const result = step({
       machine,
       phase,
+      trolley,
       motion: { stroke: closed ? CLOSED_STROKE : 0, velocity: 0 },
     });
     machine = result.machine;
+    trolley.x += result.driveX * FRAME;
+    trolley.z += result.driveZ * FRAME;
     if (result.nextPhase !== phase) seen.push(result.nextPhase);
     phase = result.nextPhase;
   }

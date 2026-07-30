@@ -34,7 +34,7 @@ const [
   ]);
 
 test("shows editable claw component specifications in the right inspector", () => {
-  assert.match(panelSource, /집게 부품 스펙/);
+  assert.match(panelSource, /<h2>부품 스펙<\/h2>/);
   assert.match(panelSource, /반복 부품은 하나만 표시/);
   assert.match(panelSource, /곡선 손가락/);
   assert.match(panelSource, /count: 3/);
@@ -46,7 +46,7 @@ test("shows editable claw component specifications in the right inspector", () =
   assert.match(inspectorSource, /부품 스펙/);
   assert.match(inspectorSource, /role="tablist"/);
   assert.match(labSource, /setInspectorMode\("specs"\)/);
-  assert.match(labSource, /집게 스펙/);
+  assert.match(labSource, /<span>부품 스펙<\/span>/);
   assert.doesNotMatch(labSource, /href="\/claw-specs"/);
   assert.doesNotMatch(labSource, /ClawSpecsModal/);
   assert.doesNotMatch(cssSource, /\.spec-modal-backdrop/);
@@ -157,7 +157,7 @@ test("persists safe editable dimensions and shares them with render and physics"
   );
   assert.match(
     clawSource,
-    /TROLLEY_BODY_SIZE \/ 2 - trolleyConnectionInset/,
+    /TROLLEY\.size \/ 2 - trolleyConnectionInset/,
   );
   assert.match(
     clawSource,

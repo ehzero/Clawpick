@@ -248,6 +248,60 @@ const PARTS: ReadonlyArray<PartDefinition> = [
       },
     ],
   },
+  {
+    id: "gantry-rod",
+    number: "09",
+    name: "갠트리 봉",
+    english: "Gantry rod",
+    count: 5,
+    role:
+      "고정 측면 봉 2개, 캐리지가 타는 브리지 봉 2개, 그 위를 잇는 타이 봉 1개가 모두 같은 규격의 봉입니다. 길이는 지정하지 않고 캐비닛 내부 치수에서 자동으로 계산됩니다.",
+    scope: ["렌더 매시", "콜라이더"],
+    fields: [
+      {
+        key: "rodDiameter",
+        label: "봉 지름",
+        description: "모든 봉이 공유하는 단면 지름. 바퀴 축 높이에 반영됩니다",
+      },
+      {
+        key: "bridgeRodSpacing",
+        label: "브리지 봉 간격",
+        description: "캐리지가 기우는 것을 막는 두 봉의 전후 중심 간격",
+      },
+    ],
+  },
+  {
+    id: "gantry-wheel",
+    number: "10",
+    name: "갠트리 홈 바퀴",
+    english: "Grooved gantry wheel",
+    count: 8,
+    role:
+      "레일 위 4개와 캐리지 4개가 모두 같은 규격의 흰색 나일론 홈 바퀴입니다. 홈이 봉에 얹히고 플랜지가 봉을 감쌉니다. 플랜지 지름과 홈 폭은 봉을 물 수 있는 최소값으로 자동 보정됩니다.",
+    scope: ["렌더 매시"],
+    fields: [
+      {
+        key: "wheelGrooveDiameter",
+        label: "홈 지름",
+        description: "봉에 닿는 홈 바닥의 지름. 바퀴 축 높이를 결정합니다",
+      },
+      {
+        key: "wheelFlangeDiameter",
+        label: "플랜지 지름",
+        description: "봉을 감싸 이탈을 막는 양쪽 테두리의 외경",
+      },
+      {
+        key: "wheelGrooveWidth",
+        label: "홈 폭",
+        description: "봉이 들어앉는 홈의 축 방향 폭",
+      },
+      {
+        key: "trolleyWheelSpacing",
+        label: "캐리지 바퀴 간격",
+        description: "캐리지 앞뒤 두 축의 좌우 중심 간격",
+      },
+    ],
+  },
 ];
 
 function displayFactor(unit: SpecField["unit"]) {
@@ -338,7 +392,7 @@ export default function ClawSpecsPanel() {
       <div className="panel-heading">
         <div>
           <span className="eyebrow">COMPONENT DIMENSIONS</span>
-          <h2>집게 부품 스펙</h2>
+          <h2>부품 스펙</h2>
         </div>
         <Ruler size={20} />
       </div>

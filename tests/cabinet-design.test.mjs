@@ -92,6 +92,12 @@ test("detailed cabinet visuals keep the simple physics shell", async () => {
   );
   assert.match(
     source,
-    /<group name="cabinet-render-meshes" visible=\{showVisuals\}>[\s\S]*?<CabinetVisuals \/>/,
+    /<group name="cabinet-render-meshes" visible=\{showVisuals\}>[\s\S]*?<CabinetVisuals /,
+  );
+  // The marquee roofs the cabinet, so it gets its own toggle for looking down
+  // at the gantry — without touching the ceiling collider.
+  assert.match(
+    source,
+    /name="illuminated-marquee-group" visible=\{showTopCover\}/,
   );
 });

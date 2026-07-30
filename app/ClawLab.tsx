@@ -6,6 +6,7 @@ import {
   Bug,
   CheckCircle2,
   Download,
+  PanelTop,
   RefreshCcw,
   Ruler,
   TimerReset,
@@ -75,6 +76,8 @@ export default function ClawLab() {
   const reset = useGameStore((state) => state.reset);
   const debug = useGameStore((state) => state.debug);
   const toggleDebug = useGameStore((state) => state.toggleDebug);
+  const topCoverHidden = useGameStore((state) => state.topCoverHidden);
+  const toggleTopCover = useGameStore((state) => state.toggleTopCover);
   const closeParts = useCallback(() => setPartsOpen(false), []);
 
   return (
@@ -104,12 +107,12 @@ export default function ClawLab() {
                 : "parts-nav-link"
             }
             onClick={() => setInspectorMode("specs")}
-            aria-label="집게 부품 스펙"
-            title="집게 부품 스펙"
+            aria-label="부품 스펙"
+            title="부품 스펙"
             aria-pressed={inspectorMode === "specs"}
           >
             <Ruler size={16} />
-            <span>집게 스펙</span>
+            <span>부품 스펙</span>
           </button>
           <button
             type="button"
@@ -123,10 +126,23 @@ export default function ClawLab() {
           </button>
           <button
             type="button"
+            className={
+              topCoverHidden ? "icon-action active" : "icon-action"
+            }
+            onClick={toggleTopCover}
+            aria-label="상단 덮개 제거"
+            title="상단 덮개 제거 (위에서 내려다보기)"
+            aria-pressed={topCoverHidden}
+          >
+            <PanelTop size={17} />
+          </button>
+          <button
+            type="button"
             className={debug ? "icon-action active" : "icon-action"}
             onClick={toggleDebug}
             aria-label="물리 충돌체 표시"
             title="물리 충돌체 표시"
+            aria-pressed={debug}
           >
             <Bug size={17} />
           </button>

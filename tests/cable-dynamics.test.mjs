@@ -15,6 +15,7 @@ import {
   getOpenClawLowestY,
 } from "../game/clawKinematics.mjs";
 import { PRIZE_DECK_FLOOR_Y } from "../game/machineDimensions.mjs";
+import { TROLLEY } from "../game/gantryGeometry.mjs";
 
 const ZERO = { x: 0, y: 0, z: 0 };
 
@@ -49,29 +50,63 @@ test("the hoist cable starts at the guide exit instead of its solid center", asy
     source,
     /const WIRE_EXIT_Y = WIRE_GUIDE_CENTER_Y \+ WIRE_EXIT_LOCAL_Y;/,
   );
+  // The rope hangs off the carriage now, so the anchor is the guide offset
+  // plus the exit offset, both local to the trolley body.
   assert.match(
     source,
-    /rapier\.JointData\.rope\([\s\S]*?\{ x: 0, y: WIRE_EXIT_LOCAL_Y, z: 0 \}/,
+    /rapier\.JointData\.rope\([\s\S]*?\{ x: 0, y: WIRE_GUIDE_OFFSET_Y \+ WIRE_EXIT_LOCAL_Y, z: 0 \}/,
   );
-  // Tolerant of how the vector is built, strict about the height it uses.
-  assert.match(source, /const anchor = [\s\S]{0,160}WIRE_EXIT_Y/);
+  // The exit height is measured off the moving carriage now, but it is still
+  // the guide's bottom face rather than its solid centre.
+  assert.match(
+    source,
+    /const wireExitY =[\s\S]{0,120}WIRE_GUIDE_OFFSET_Y \+ WIRE_EXIT_LOCAL_Y/,
+  );
+  assert.match(source, /const anchor = [\s\S]{0,160}wireExitY/);
   assert.match(
     source,
     /const CLAW_START_Y =\s*WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH/,
   );
 });
 
-test("the trolley body render mesh is a cube", async () => {
+test("the wire guide hangs under the carriage, not inside it", async () => {
   const source = await readFile(
     new URL("../components/MechanicalClaw.tsx", import.meta.url),
     "utf8",
   );
+  const guideHeight = Number(
+    source.match(/const WIRE_GUIDE_HEIGHT = ([\d.]+);/)?.[1],
+  );
+  assert.ok(guideHeight > 0, "guide height should be readable");
 
-  assert.match(source, /const TROLLEY_BODY_SIZE = 0\.64;/);
+  // The offset is derived, so recompute it the way the component does.
+  const offsetY = -(TROLLEY.size / 2) - guideHeight / 2;
+  const carriageBottom = TROLLEY.y - TROLLEY.size / 2;
+  const guideTop = TROLLEY.y + offsetY + guideHeight / 2;
+  const guideBottom = TROLLEY.y + offsetY - guideHeight / 2;
+
+  assert.ok(
+    guideTop <= carriageBottom + 1e-9,
+    `guide top ${guideTop} must not rise into the carriage (bottom ${carriageBottom})`,
+  );
+  assert.ok(guideBottom < carriageBottom, "and it hangs below");
+  assert.match(
+    source,
+    /const WIRE_GUIDE_OFFSET_Y = -\(TROLLEY\.size \/ 2\) - WIRE_GUIDE_HEIGHT \/ 2;/,
+  );
+});
+
+test("the trolley body render mesh is a cube", async () => {
+  const source = await readFile(
+    new URL("../components/GantryMechanism.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(TROLLEY.size, 0.64);
   assert.match(source, /name="trolley-body-cube"/);
   assert.match(
     source,
-    /args=\{\[\s*TROLLEY_BODY_SIZE,\s*TROLLEY_BODY_SIZE,\s*TROLLEY_BODY_SIZE,\s*\]\}/,
+    /args=\{\[TROLLEY\.size, TROLLEY\.size, TROLLEY\.size\]\}/,
   );
 });
 

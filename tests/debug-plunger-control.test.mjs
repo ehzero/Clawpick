@@ -77,6 +77,34 @@ test("the claw tuning panel exposes every claw physics setting", async () => {
   );
 });
 
+test("every physics setting is reachable from the tuning panel", async () => {
+  const [panel, store] = await Promise.all([
+    readFile(new URL("../components/TuningPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../game/store.ts", import.meta.url), "utf8"),
+  ]);
+
+  // Derived from the store rather than a hand-kept list, so a setting added to
+  // PHYSICS_SETTING_LIMITS without a slider fails here instead of shipping
+  // untunable.
+  const limits = store.slice(
+    store.indexOf("PHYSICS_SETTING_LIMITS"),
+    store.indexOf("function clampSetting"),
+  );
+  const settings = [...limits.matchAll(/^ {2}([a-zA-Z]+): \{ min:/gm)].map(
+    (match) => match[1],
+  );
+  assert.ok(settings.length > 15, "should have found the limit table");
+
+  const missing = settings.filter(
+    (setting) => !panel.includes(`setting: "${setting}"`),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `settings with no slider in the panel: ${missing.join(", ")}`,
+  );
+});
+
 test("manual and automatic winches share fixed geometric cable limits", async () => {
   const [panel, store, claw] = await Promise.all([
     readFile(new URL("../components/TuningPanel.tsx", import.meta.url), "utf8"),
@@ -121,6 +149,8 @@ test("the manual and automatic winches stop at the same two limits", () => {
     plungerVelocityTolerance: 0.018,
     plungerSpeed: 0.19,
     plungerMaxForce: 18,
+    gantryDriveStiffness: 900,
+    gantryCoastRatio: 0.45,
   };
   const plunger = { openY: -0.42, closedY: -0.298, motion: null };
 
@@ -144,6 +174,7 @@ test("the manual and automatic winches stop at the same two limits", () => {
         settings,
         limits,
         plunger,
+        trolley: { x: 0, z: 0 },
         actualCableLength: machine.cableLength,
         dt: 1 / 60,
       }).machine;

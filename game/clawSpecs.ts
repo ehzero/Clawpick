@@ -2,6 +2,10 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  DEFAULT_GANTRY_PART_SPECS,
+  normalizeGantryPartSpecs,
+} from "./gantryGeometry.mjs";
 import type { ClawPartSpecs } from "./types";
 
 export const DEFAULT_CLAW_PART_SPECS: Readonly<ClawPartSpecs> = Object.freeze({
@@ -23,6 +27,7 @@ export const DEFAULT_CLAW_PART_SPECS: Readonly<ClawPartSpecs> = Object.freeze({
   fingerLength: 0.9765105457,
   fingerTaperStart: 0.77,
   fingerTipWidthScale: 0.62,
+  ...DEFAULT_GANTRY_PART_SPECS,
 });
 
 export const CLAW_PART_SPEC_LIMITS: Record<
@@ -47,6 +52,17 @@ export const CLAW_PART_SPEC_LIMITS: Record<
   fingerLength: { min: 0.72, max: 1.18 },
   fingerTaperStart: { min: 0.55, max: 0.92 },
   fingerTipWidthScale: { min: 0.35, max: 1 },
+  // The rod, its wheel groove and that wheel's flange stack straight up from
+  // the rail centre, so their maxima together decide how close the gantry gets
+  // to the cabinet ceiling at 4.20. Keep the sum under 0.55.
+  // A wider wheel pushes the side rods inboard, which shortens the carriage's
+  // travel; these maxima keep it within reach of the prize chute.
+  rodDiameter: { min: 0.07, max: 0.11 },
+  wheelGrooveDiameter: { min: 0.09, max: 0.14 },
+  wheelFlangeDiameter: { min: 0.2, max: 0.28 },
+  wheelGrooveWidth: { min: 0.09, max: 0.13 },
+  bridgeRodSpacing: { min: 0.2, max: 0.44 },
+  trolleyWheelSpacing: { min: 0.18, max: 0.46 },
 };
 
 function clampSpec(key: keyof ClawPartSpecs, value: number) {
@@ -80,6 +96,8 @@ export function normalizeClawPartSpecs(input: unknown): ClawPartSpecs {
     next.powerCableCoilDiameter,
     next.powerCableDiameter + 0.02,
   );
+  // The wheel/rod fit constraints live with the geometry that depends on them.
+  Object.assign(next, normalizeGantryPartSpecs(next));
 
   return next;
 }
@@ -130,7 +148,7 @@ export const useClawSpecStore = create<ClawSpecStore>()(
     }),
     {
       name: "clawpick-claw-part-specs",
-      version: 8,
+      version: 10,
       partialize: (state) => ({ specs: state.specs }),
       migrate: (persisted, version) => {
         const state = persisted as {
@@ -141,7 +159,7 @@ export const useClawSpecStore = create<ClawSpecStore>()(
           typeof value === "number" && Number.isFinite(value)
             ? value
             : fallback;
-        if (version >= 8) return persisted;
+        if (version >= 10) return persisted;
         if (version >= 4) {
           const savedTurns = numberOr(
             saved.powerCableTurns,

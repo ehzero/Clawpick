@@ -9,27 +9,28 @@
  * Nothing in here touches React, three.js or Rapier.
  */
 
+import {
+  positionApproachVelocity,
+  stepAxisCommand,
+} from "./driveAxis.mjs";
+
 export const CABLE_LIMIT_EPSILON = 0.001;
 export const CHUTE_ARRIVAL_DISTANCE = 0.035;
 export const CHUTE_ARRIVAL_SPEED = 0.01;
 export const DESCENT_ARRIVAL_SLACK = 0.07;
 export const DESCENT_TIMEOUT = 3;
 export const SETTLING_DURATION = 3.1;
-export const RETURN_STEER_DEADBAND = 0.02;
 
 export function createMachineState(cableLength) {
   return {
     phase: "aiming",
     phaseElapsed: 0,
     cableLength,
-    trolley: { x: 0, z: 0 },
-    trolleyVelocity: { x: 0, z: 0 },
+    // Ramped velocity commands handed to the gantry axis motors. The axes'
+    // actual positions are measured from the physics bodies, not tracked here.
+    commandedX: 0,
+    commandedZ: 0,
   };
-}
-
-function approach(current, target, amount) {
-  if (current < target) return Math.min(target, current + amount);
-  return Math.max(target, current - amount);
 }
 
 function clamp(value, minimum, maximum) {
@@ -71,6 +72,8 @@ export function stepMachine({
   settings,
   limits,
   plunger,
+  /** Measured carriage position, read from the gantry bodies. */
+  trolley,
   actualCableLength,
   dt,
 }) {
@@ -106,54 +109,58 @@ export function stepMachine({
   const plungerTarget = forceClosed ? plunger.closedY : plunger.openY;
   const closedStroke = plunger.closedY - plunger.openY;
 
-  // --- trolley ------------------------------------------------------------
+  // --- gantry axes --------------------------------------------------------
+  // Each axis is an independent motor, so each brakes onto its own target.
+  // A two-axis gantry does not travel in a straight diagonal, and this is why.
+  const acceleration =
+    settings.trolleyAcceleration *
+    (phase === "aiming" ? 1 : settings.returnAccelerationMultiplier);
+  const maxSpeed =
+    settings.moveSpeed *
+    (phase === "returning" ? settings.returnSpeedMultiplier : 1);
+
   let desiredX = 0;
   let desiredZ = 0;
   if (phase === "aiming") {
     desiredX = input.x * settings.moveSpeed;
     desiredZ = input.z * settings.moveSpeed;
   } else if (phase === "returning") {
-    const deltaX = chuteX - machine.trolley.x;
-    const deltaZ = chuteZ - machine.trolley.z;
-    const distance = Math.hypot(deltaX, deltaZ);
-    if (distance > RETURN_STEER_DEADBAND) {
-      const speed = settings.moveSpeed * settings.returnSpeedMultiplier;
-      desiredX = (deltaX / distance) * speed;
-      desiredZ = (deltaZ / distance) * speed;
-    }
+    desiredX = positionApproachVelocity({
+      position: trolley.x,
+      target: chuteX,
+      maxSpeed,
+      deceleration: acceleration,
+    });
+    desiredZ = positionApproachVelocity({
+      position: trolley.z,
+      target: chuteZ,
+      maxSpeed,
+      deceleration: acceleration,
+    });
   }
 
-  const acceleration =
-    settings.trolleyAcceleration *
-    (phase === "aiming" ? 1 : settings.returnAccelerationMultiplier);
-  const trolleyVelocity = {
-    x: approach(machine.trolleyVelocity.x, desiredX, acceleration * dt),
-    z: approach(machine.trolleyVelocity.z, desiredZ, acceleration * dt),
+  const axis = {
+    acceleration,
+    coastAcceleration: acceleration * settings.gantryCoastRatio,
+    maxSpeed,
+    dt,
   };
-  const trolley = {
-    x: clamp(
-      machine.trolley.x + trolleyVelocity.x * dt,
-      -trolleyLimitX,
-      trolleyLimitX,
-    ),
-    z: clamp(
-      machine.trolley.z + trolleyVelocity.z * dt,
-      -trolleyLimitZ,
-      trolleyLimitZ,
-    ),
-  };
-  if (
-    Math.abs(trolley.x) >= trolleyLimitX &&
-    Math.sign(trolleyVelocity.x) === Math.sign(trolley.x)
-  ) {
-    trolleyVelocity.x = 0;
-  }
-  if (
-    Math.abs(trolley.z) >= trolleyLimitZ &&
-    Math.sign(trolleyVelocity.z) === Math.sign(trolley.z)
-  ) {
-    trolleyVelocity.z = 0;
-  }
+  const commandedX = stepAxisCommand({
+    ...axis,
+    commanded: machine.commandedX,
+    desired: desiredX,
+    position: trolley.x,
+    minPosition: -trolleyLimitX,
+    maxPosition: trolleyLimitX,
+  });
+  const commandedZ = stepAxisCommand({
+    ...axis,
+    commanded: machine.commandedZ,
+    desired: desiredZ,
+    position: trolley.z,
+    minPosition: -trolleyLimitZ,
+    maxPosition: trolleyLimitZ,
+  });
 
   // --- winch and phase transitions ---------------------------------------
   let nextPhase = phase;
@@ -234,7 +241,7 @@ export function stepMachine({
     const distance = Math.hypot(chuteX - trolley.x, chuteZ - trolley.z);
     if (
       distance < CHUTE_ARRIVAL_DISTANCE &&
-      Math.hypot(desiredX, desiredZ) < CHUTE_ARRIVAL_SPEED
+      Math.hypot(commandedX, commandedZ) < CHUTE_ARRIVAL_SPEED
     ) {
       nextPhase = "releasing";
     }
@@ -264,10 +271,13 @@ export function stepMachine({
       phase,
       phaseElapsed,
       cableLength,
-      trolley,
-      trolleyVelocity,
+      commandedX,
+      commandedZ,
     },
     nextPhase,
+    // Target velocities for the gantry axis motors, in m/s.
+    driveX: commandedX,
+    driveZ: commandedZ,
     plungerTarget,
     targetLengthRate:
       (cableLength - previousCableLength) / Math.max(dt, 0.0001),
