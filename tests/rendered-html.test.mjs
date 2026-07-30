@@ -4,13 +4,13 @@ import test from "node:test";
 
 const templateRoot = new URL("../", import.meta.url);
 
-async function render() {
+async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", {
+    new Request(`http://localhost${pathname}`, {
       headers: { accept: "text/html" },
     }),
     {
@@ -39,6 +39,7 @@ test("server-renders the Clawpick physics lab shell", async () => {
   assert.match(html, /물리 튜닝/);
   assert.match(html, /간단 설정/);
   assert.match(html, /고급 설정/);
+  assert.match(html, /부품 용어집/);
   assert.match(html, /파지력/);
   assert.match(html, /작동 속도/);
   assert.match(html, /안정성/);

@@ -416,7 +416,7 @@ export function TuningPanel() {
   };
 
   return (
-    <aside className="tuning-panel">
+    <div className="tuning-panel-view inspector-view">
       <div className="panel-heading">
         <div>
           <span className="eyebrow">LIVE PARAMETERS</span>
@@ -569,6 +569,6 @@ export function TuningPanel() {
           새 라운드를 시작해 정확히 비교하세요.
         </p>
       </div>
-    </aside>
+    </div>
   );
 }

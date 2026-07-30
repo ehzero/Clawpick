@@ -38,6 +38,27 @@ export interface PhysicsSettings {
   gravity: number;
 }
 
+export interface ClawPartSpecs {
+  powerCableDiameter: number;
+  powerCableCoilDiameter: number;
+  powerCableTurns: number;
+  powerCableSegments: number;
+  powerCableSlack: number;
+  housingDiameter: number;
+  housingHeight: number;
+  plungerShaftDiameter: number;
+  plungerShaftLength: number;
+  plungerHubDiameter: number;
+  plungerHubThickness: number;
+  linkWidth: number;
+  linkThickness: number;
+  hingePinDiameter: number;
+  hingePinLength: number;
+  fingerLength: number;
+  fingerTaperStart: number;
+  fingerTipWidthScale: number;
+}
+
 export interface PerformanceMetrics {
   fps: number;
   minFps: number;

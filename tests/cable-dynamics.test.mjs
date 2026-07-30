@@ -24,6 +24,34 @@ test("the raised claw retracts almost all visible cable", async () => {
   assert.ok(attachmentY >= 0.36);
 });
 
+test("the hoist cable starts at the guide exit instead of its solid center", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /const WIRE_EXIT_LOCAL_Y = -WIRE_GUIDE_HEIGHT \/ 2;/,
+  );
+  assert.match(
+    source,
+    /const WIRE_EXIT_Y = WIRE_GUIDE_CENTER_Y \+ WIRE_EXIT_LOCAL_Y;/,
+  );
+  assert.match(
+    source,
+    /rapier\.JointData\.rope\([\s\S]*?\{ x: 0, y: WIRE_EXIT_LOCAL_Y, z: 0 \}/,
+  );
+  assert.match(
+    source,
+    /const anchor = new THREE\.Vector3\([\s\S]*?WIRE_EXIT_Y/,
+  );
+  assert.match(
+    source,
+    /const CLAW_START_Y =\s*WIRE_EXIT_Y - MIN_CABLE_LENGTH/,
+  );
+});
+
 function radialRate(direction, anchorVelocity, attachmentVelocity) {
   return (
     (anchorVelocity.x - attachmentVelocity.x) * direction.x +
@@ -133,13 +161,24 @@ test("the suspended claw keeps all body rotation axes physical", async () => {
     source,
     /WIRE_GUIDE_COLLISION_GROUPS = interactionGroups\(\[4\], \[1\]\)/,
   );
+  assert.match(source, /const WIRE_GUIDE_RADIUS = 0\.22;/);
+  assert.match(source, /const WIRE_GUIDE_HEIGHT = 0\.08;/);
+  assert.match(source, /const CLAW_ATTACHMENT_Y = 0\.4;/);
   assert.match(
     source,
-    /name="winch-rope-anchor"[\s\S]*?<CylinderCollider[\s\S]*?args=\{\[0\.02, 0\.22\]\}[\s\S]*?position=\{\[0, 0\.02, 0\]\}[\s\S]*?collisionGroups=\{WIRE_GUIDE_COLLISION_GROUPS\}/,
+    /name="wire-exit-guide"[\s\S]*?name="wire-exit-guide-render-meshes"[\s\S]*?<cylinderGeometry[\s\S]*?WIRE_GUIDE_RADIUS,[\s\S]*?WIRE_GUIDE_RADIUS,[\s\S]*?WIRE_GUIDE_HEIGHT,[\s\S]*?<torusGeometry args=\{\[0\.17, 0\.05, 8, 24\]\}[\s\S]*?<CylinderCollider[\s\S]*?args=\{\[WIRE_GUIDE_HEIGHT \/ 2, WIRE_GUIDE_RADIUS\]\}[\s\S]*?collisionGroups=\{WIRE_GUIDE_COLLISION_GROUPS\}/,
   );
   assert.match(
     source,
-    /position=\{\[0, 3\.84, 0\]\}[\s\S]*?<cylinderGeometry args=\{\[0\.22, 0\.22, 0\.08, 24\]\}/,
+    /name="wire-exit-guide-render-meshes" visible=\{!debug\}/,
+  );
+  assert.doesNotMatch(
+    source,
+    /<CylinderCollider[\s\S]{0,160}args=\{\[WIRE_GUIDE_HEIGHT \/ 2, WIRE_GUIDE_RADIUS\]\}[\s\S]{0,160}position=/,
+  );
+  assert.doesNotMatch(
+    source,
+    /position=\{\[0, 0\.455, 0\]\}|position=\{\[0, 0\.505, 0\]\}/,
   );
   assert.match(
     source,

@@ -1,34 +1,60 @@
 const DEG = Math.PI / 180;
 
-export const CLAW_GEOMETRY = Object.freeze({
-  rigidSegmentsPerFinger: 1,
-  linkageJointsPerFinger: 2,
-  curvePoints: Object.freeze([
-    Object.freeze({ r: 0, y: 0 }),
-    Object.freeze({ r: 0.01, y: -0.12 }),
-    Object.freeze({ r: -0.02, y: -0.28 }),
-    Object.freeze({ r: -0.1, y: -0.48 }),
-    Object.freeze({ r: -0.23, y: -0.67 }),
-    Object.freeze({ r: -0.37, y: -0.78 }),
-  ]),
-  fingerWidth: 0.082,
-  fingerThickness: 0.032,
-  tineRadius: 0.038,
-  scoopRadius: 0.065,
-  minimumAngle: 10 * DEG,
-  maximumAngle: 54 * DEG,
-  housingPivot: Object.freeze({ r: 0.23, y: 0.12 }),
-  openFingerHinge: Object.freeze({ r: 0.31, y: -0.32 }),
-  plungerRadius: 0.12,
-  openPlungerY: -0.42,
-  closedPlungerY: -0.278,
-  fingerPlungerDirection: Object.freeze({
-    r: Math.cos(158 * DEG),
-    y: Math.sin(158 * DEG),
-  }),
-  rockerLength: Math.hypot(0.31 - 0.23, -0.32 - 0.12),
-  fingerPlungerLength: Math.hypot(0.12 - 0.31, -0.42 + 0.32),
-});
+const BASE_FINGER_LENGTH = 0.9765105457;
+const BASE_CURVE_POINTS = [
+  { r: 0, y: 0 },
+  { r: -0.0174, y: -0.1239 },
+  { r: -0.0348, y: -0.2478 },
+  { r: -0.0522, y: -0.3717 },
+  { r: -0.0702, y: -0.4995 },
+  { r: -0.1625, y: -0.6044 },
+  { r: -0.2871, y: -0.6383 },
+  { r: -0.5041, y: -0.6974 },
+];
+
+export function createClawGeometry(specs = {}) {
+  const fingerLength =
+    Number.isFinite(specs.fingerLength) && specs.fingerLength > 0
+      ? specs.fingerLength
+      : BASE_FINGER_LENGTH;
+  const fingerScale = fingerLength / BASE_FINGER_LENGTH;
+  const curvePoints = BASE_CURVE_POINTS.map((point) =>
+    Object.freeze({
+      r: point.r * fingerScale,
+      y: point.y * fingerScale,
+    }),
+  );
+
+  return Object.freeze({
+    rigidSegmentsPerFinger: 1,
+    linkageJointsPerFinger: 2,
+    fingerBendCount: 2,
+    fingerStraightEndIndex: 3,
+    fingerCurveEndIndex: 6,
+    curvePoints: Object.freeze(curvePoints),
+    fingerLength,
+    fingerWidth: specs.linkWidth ?? specs.fingerWidth ?? 0.082,
+    fingerThickness:
+      specs.linkThickness ?? specs.fingerThickness ?? 0.032,
+    fingerTaperStart: specs.fingerTaperStart ?? 0.77,
+    fingerTipWidthScale: specs.fingerTipWidthScale ?? 0.62,
+    minimumAngle: 10 * DEG,
+    maximumAngle: 54 * DEG,
+    housingPivot: Object.freeze({ r: 0.23, y: 0.12 }),
+    openFingerHinge: Object.freeze({ r: 0.31, y: -0.32 }),
+    plungerRadius: 0.12,
+    openPlungerY: -0.42,
+    closedPlungerY: -0.298,
+    fingerPlungerDirection: Object.freeze({
+      r: Math.cos(158 * DEG),
+      y: Math.sin(158 * DEG),
+    }),
+    rockerLength: Math.hypot(0.31 - 0.23, -0.32 - 0.12),
+    fingerPlungerLength: Math.hypot(0.12 - 0.31, -0.42 + 0.32),
+  });
+}
+
+export const CLAW_GEOMETRY = createClawGeometry();
 
 export function clampClosure(value) {
   return Math.min(1, Math.max(0, value));
@@ -43,8 +69,10 @@ export function smoothClosure(value) {
  * Solves the shared plunger, rocker link, and rigid finger in a radial plane.
  * `r` points out from the claw centre and `y` points upward.
  */
-export function getClawPoseFromPlungerY(inputPlungerY) {
-  const geometry = CLAW_GEOMETRY;
+export function getClawPoseFromPlungerY(
+  inputPlungerY,
+  geometry = CLAW_GEOMETRY,
+) {
   const plungerY = Math.min(
     geometry.closedPlungerY,
     Math.max(geometry.openPlungerY, inputPlungerY),
@@ -117,26 +145,28 @@ export function getClawPoseFromPlungerY(inputPlungerY) {
   };
 }
 
-export function getClawPose(closure) {
-  const geometry = CLAW_GEOMETRY;
+export function getClawPose(closure, geometry = CLAW_GEOMETRY) {
   const stroke = smoothClosure(closure);
   const plungerY =
     geometry.openPlungerY +
     (geometry.closedPlungerY - geometry.openPlungerY) * stroke;
-  return getClawPoseFromPlungerY(plungerY);
+  return getClawPoseFromPlungerY(plungerY, geometry);
 }
 
-export function sampleClawClearance(samples = 101) {
+export function sampleClawClearance(
+  samples = 101,
+  geometry = CLAW_GEOMETRY,
+) {
   let minimum = Number.POSITIVE_INFINITY;
   for (let index = 0; index < samples; index += 1) {
     const stroke = index / Math.max(1, samples - 1);
     const plungerY =
-      CLAW_GEOMETRY.openPlungerY +
-      (CLAW_GEOMETRY.closedPlungerY - CLAW_GEOMETRY.openPlungerY) *
+      geometry.openPlungerY +
+      (geometry.closedPlungerY - geometry.openPlungerY) *
         stroke;
-    const pose = getClawPoseFromPlungerY(plungerY);
+    const pose = getClawPoseFromPlungerY(plungerY, geometry);
     const clearance =
-      pose.tipSeparation - CLAW_GEOMETRY.scoopRadius * 2;
+      pose.tipSeparation - geometry.fingerWidth;
     minimum = Math.min(minimum, clearance);
   }
   return minimum;

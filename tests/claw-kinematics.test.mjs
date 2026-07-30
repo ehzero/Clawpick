@@ -3,20 +3,109 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   CLAW_GEOMETRY,
+  createClawGeometry,
   getClawPose,
   getClawPoseFromPlungerY,
   sampleClawClearance,
 } from "../game/clawKinematics.mjs";
 
+test("editable finger dimensions preserve the linkage and scale the path", () => {
+  const scaled = createClawGeometry({
+    fingerLength: CLAW_GEOMETRY.fingerLength * 1.1,
+    fingerWidth: 0.09,
+    fingerThickness: 0.035,
+    fingerTaperStart: 0.72,
+    fingerTipWidthScale: 0.55,
+  });
+
+  assert.equal(scaled.fingerWidth, 0.09);
+  assert.equal(scaled.fingerThickness, 0.035);
+  assert.equal(scaled.fingerTaperStart, 0.72);
+  assert.equal(scaled.fingerTipWidthScale, 0.55);
+  assert.ok(
+    Math.abs(
+      scaled.curvePoints.at(-1).y /
+        CLAW_GEOMETRY.curvePoints.at(-1).y -
+        1.1,
+    ) < 1e-9,
+  );
+  assert.equal(scaled.rockerLength, CLAW_GEOMETRY.rockerLength);
+  assert.equal(
+    scaled.fingerPlungerLength,
+    CLAW_GEOMETRY.fingerPlungerLength,
+  );
+});
+
 test("each curved finger stays rigid while its two linkage pivots move", () => {
   assert.equal(CLAW_GEOMETRY.rigidSegmentsPerFinger, 1);
   assert.equal(CLAW_GEOMETRY.linkageJointsPerFinger, 2);
+  assert.equal(CLAW_GEOMETRY.fingerBendCount, 2);
+  assert.equal(CLAW_GEOMETRY.fingerStraightEndIndex, 3);
+  assert.equal(CLAW_GEOMETRY.fingerCurveEndIndex, 6);
   assert.ok(CLAW_GEOMETRY.curvePoints.length >= 6);
   assert.ok(CLAW_GEOMETRY.fingerWidth > CLAW_GEOMETRY.fingerThickness);
   assert.notEqual(
     CLAW_GEOMETRY.curvePoints[1].r / CLAW_GEOMETRY.curvePoints[1].y,
     CLAW_GEOMETRY.curvePoints[3].r / CLAW_GEOMETRY.curvePoints[3].y,
     "the single rigid finger should follow a curve instead of a straight line",
+  );
+  const straightEnd =
+    CLAW_GEOMETRY.curvePoints[CLAW_GEOMETRY.fingerStraightEndIndex];
+  for (
+    let index = 1;
+    index < CLAW_GEOMETRY.fingerStraightEndIndex;
+    index += 1
+  ) {
+    const point = CLAW_GEOMETRY.curvePoints[index];
+    assert.ok(
+      Math.abs(point.r * straightEnd.y - point.y * straightEnd.r) < 0.001,
+      "the section after the hinge should be exactly straight",
+    );
+  }
+  const lowerSegments = [0, 1, 2].map((offset) => {
+    const index = CLAW_GEOMETRY.fingerStraightEndIndex + offset;
+    return {
+      r:
+        CLAW_GEOMETRY.curvePoints[index + 1].r -
+        CLAW_GEOMETRY.curvePoints[index].r,
+      y:
+        CLAW_GEOMETRY.curvePoints[index + 1].y -
+        CLAW_GEOMETRY.curvePoints[index].y,
+    };
+  });
+  const lowerTurns = [0, 1].map(
+    (index) =>
+      lowerSegments[index].r * lowerSegments[index + 1].y -
+      lowerSegments[index].y * lowerSegments[index + 1].r,
+  );
+  assert.ok(
+    lowerTurns.every((turn) => turn < 0),
+    "the lower profile should turn inward as one continuous rounded bend",
+  );
+  const turnRatio = Math.abs(lowerTurns[0] / lowerTurns[1]);
+  assert.ok(
+    turnRatio > 0.8 && turnRatio < 1.2,
+    "the curve handles should distribute curvature uniformly",
+  );
+  const firstLower = lowerSegments[0];
+  const lastLower = lowerSegments.at(-1);
+  const lowerBendDot =
+    (firstLower.r * lastLower.r + firstLower.y * lastLower.y) /
+    (Math.hypot(firstLower.r, firstLower.y) *
+      Math.hypot(lastLower.r, lastLower.y));
+  assert.ok(
+    Math.acos(lowerBendDot) > 0.85,
+    "the single lower bend should visibly turn the tip inward",
+  );
+  const lowerStraightStart =
+    CLAW_GEOMETRY.curvePoints[CLAW_GEOMETRY.fingerCurveEndIndex];
+  const fingerTip = CLAW_GEOMETRY.curvePoints.at(-1);
+  assert.ok(
+    Math.hypot(
+      fingerTip.r - lowerStraightStart.r,
+      fingerTip.y - lowerStraightStart.y,
+    ) > 0.22,
+    "the lower straight should remain visibly long after the bend",
   );
 
   for (let index = 0; index <= 100; index += 1) {
@@ -101,10 +190,10 @@ test("plunger displacement is the sole input to the linkage solver", () => {
   );
 });
 
-test("three scoops retain physical clearance throughout closure", () => {
+test("three fingers retain physical clearance throughout closure", () => {
   assert.ok(
     sampleClawClearance(501) > 0.02,
-    "scoop colliders must not overlap at any closure value",
+    "finger colliders must not overlap at any closure value",
   );
 
   let previousRadius = Number.POSITIVE_INFINITY;
@@ -126,7 +215,7 @@ test("the mechanical claw does not use a hidden prize attraction force", async (
   assert.doesNotMatch(source, /applyGripAssist|gripRadius|grabbed\.current/);
   assert.match(source, /createFingerStripGeometry/);
   assert.doesNotMatch(source, /<tubeGeometry/);
-  assert.match(source, /umbilicalRef/);
+  assert.match(source, /power-umbilical-continuous-tube/);
   assert.match(source, /rockerLink/);
   assert.match(source, /plungerArm/);
   assert.doesNotMatch(source, /driveTail|driveSlot/);
@@ -227,8 +316,19 @@ test("the housing uses one simple cylindrical collider", async () => {
   assert.ok(housingStart >= 0);
   assert.ok(visualStart > housingStart);
   assert.equal(housingColliders.match(/<CylinderCollider/g)?.length, 1);
-  assert.match(housingColliders, /args=\{\[0\.31, 0\.22\]\}/);
-  assert.match(housingColliders, /position=\{\[0, 0\.09, 0\]\}/);
+  assert.match(
+    housingColliders,
+    /clawPartDimensions\.housing\.halfHeight/,
+  );
+  assert.match(
+    housingColliders,
+    /clawPartDimensions\.housing\.radius/,
+  );
+  assert.match(source, /const HOUSING_COLLIDER_CENTER_Y = 0\.09;/);
+  assert.match(
+    housingColliders,
+    /position=\{\[0, HOUSING_COLLIDER_CENTER_Y, 0\]\}/,
+  );
   assert.match(housingColliders, /mass=\{1\.02\}/);
   assert.match(
     housingColliders,

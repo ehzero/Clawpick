@@ -1,17 +1,24 @@
 "use client";
 import {
   Activity,
+  BookOpen,
   Box,
   Bug,
   CheckCircle2,
   Download,
   RefreshCcw,
+  Ruler,
   TimerReset,
   XCircle,
 } from "lucide-react";
+import { useCallback, useState } from "react";
+import PartsGlossaryModal from "@/app/PartsGlossaryModal";
 import GameCanvas from "@/components/GameCanvas";
 import { Controls } from "@/components/Controls";
-import { TuningPanel } from "@/components/TuningPanel";
+import InspectorPanel, {
+  type InspectorMode,
+} from "@/components/InspectorPanel";
+import { useClawSpecStore } from "@/game/clawSpecs";
 import { useGameStore } from "@/game/store";
 import type { GamePhase } from "@/game/types";
 
@@ -35,6 +42,7 @@ function exportSession() {
     endedAt: new Date().toISOString(),
     device: navigator.userAgent,
     settings: state.settings,
+    clawPartSpecs: useClawSpecStore.getState().specs,
     metrics: state.metrics,
     result: state.result,
     events: state.events,
@@ -52,12 +60,16 @@ function exportSession() {
 }
 
 export default function ClawLab() {
+  const [partsOpen, setPartsOpen] = useState(false);
+  const [inspectorMode, setInspectorMode] =
+    useState<InspectorMode>("physics");
   const phase = useGameStore((state) => state.phase);
   const result = useGameStore((state) => state.result);
   const metrics = useGameStore((state) => state.metrics);
   const reset = useGameStore((state) => state.reset);
   const debug = useGameStore((state) => state.debug);
   const toggleDebug = useGameStore((state) => state.toggleDebug);
+  const closeParts = useCallback(() => setPartsOpen(false), []);
 
   return (
     <main className="app-shell">
@@ -78,6 +90,31 @@ export default function ClawLab() {
         </div>
 
         <div className="topbar-actions">
+          <button
+            type="button"
+            className={
+              inspectorMode === "specs"
+                ? "parts-nav-link active"
+                : "parts-nav-link"
+            }
+            onClick={() => setInspectorMode("specs")}
+            aria-label="집게 부품 스펙"
+            title="집게 부품 스펙"
+            aria-pressed={inspectorMode === "specs"}
+          >
+            <Ruler size={16} />
+            <span>집게 스펙</span>
+          </button>
+          <button
+            type="button"
+            className="parts-nav-link"
+            onClick={() => setPartsOpen(true)}
+            aria-label="부품 용어집"
+            title="부품 용어집"
+          >
+            <BookOpen size={16} />
+            <span>부품 용어집</span>
+          </button>
           <button
             type="button"
             className={debug ? "icon-action active" : "icon-action"}
@@ -226,8 +263,12 @@ export default function ClawLab() {
           </div>
         </div>
 
-        <TuningPanel />
+        <InspectorPanel
+          mode={inspectorMode}
+          onModeChange={setInspectorMode}
+        />
       </section>
+      <PartsGlossaryModal open={partsOpen} onClose={closeParts} />
     </main>
   );
 }
