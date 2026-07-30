@@ -1,10 +1,12 @@
-export const SETTINGS_STORAGE_VERSION = 4;
+export const SETTINGS_STORAGE_VERSION = 5;
 
 const ZERO_DAMPING_PATCH = Object.freeze({
   housingAngularDamping: 0,
 });
 
-const OBSOLETE_PLUNGER_SETTINGS = Object.freeze([
+const OBSOLETE_PHYSICS_SETTINGS = Object.freeze([
+  "cableRetractedLength",
+  "cableExtendedLength",
   "plungerBrakingAcceleration",
   "plungerSettlingTime",
   "plungerResponseDistance",
@@ -23,7 +25,7 @@ export function migratePersistedSettings(settings, version) {
   const migrated = {
     ...settings,
   };
-  for (const setting of OBSOLETE_PLUNGER_SETTINGS) {
+  for (const setting of OBSOLETE_PHYSICS_SETTINGS) {
     delete migrated[setting];
   }
   return version < 3

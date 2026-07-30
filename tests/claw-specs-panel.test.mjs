@@ -155,6 +155,22 @@ test("persists safe editable dimensions and shares them with render and physics"
     clawSource,
     /start: trolleyConnection[\s\S]*?departureDirection:/,
   );
+  assert.match(
+    clawSource,
+    /TROLLEY_BODY_SIZE \/ 2 - trolleyConnectionInset/,
+  );
+  assert.match(
+    clawSource,
+    /departureDirection: trolleyOutwardDirection/,
+  );
+  const trolleyConnectionBlock = clawSource.slice(
+    clawSource.indexOf("const trolleyConnection ="),
+    clawSource.indexOf("const umbilicalTop ="),
+  );
+  assert.doesNotMatch(
+    trolleyConnectionBlock,
+    /WIRE_GUIDE_CENTER_Y/,
+  );
   assert.match(clawSource, /name="power-umbilical-continuous-tube"/);
   assert.doesNotMatch(clawSource, /<instancedMesh/);
   assert.match(panelSource, /name: "나선형 전원공급 케이블"/);

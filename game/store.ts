@@ -18,8 +18,6 @@ export const DEFAULT_SETTINGS: PhysicsSettings = {
   returnAccelerationMultiplier: 0.73,
   lowerSpeed: 1.1,
   liftSpeed: 1.25,
-  cableRetractedLength: 0.04,
-  cableExtendedLength: 1.8,
   plungerSpeed: 0.19,
   plungerMaxForce: 18,
   plungerPositionTolerance: 0.006,
@@ -45,8 +43,6 @@ export const PHYSICS_SETTING_LIMITS: Record<
   returnAccelerationMultiplier: { min: 0.2, max: 1.2 },
   lowerSpeed: { min: 0.2, max: 2 },
   liftSpeed: { min: 0.2, max: 2 },
-  cableRetractedLength: { min: 0.01, max: 0.25 },
-  cableExtendedLength: { min: 0.6, max: 2.2 },
   plungerSpeed: { min: 0.04, max: 0.35 },
   plungerMaxForce: { min: 4, max: 100 },
   plungerPositionTolerance: { min: 0.001, max: 0.02 },
@@ -103,8 +99,6 @@ export function normalizePhysicsSettings(
     returnAccelerationMultiplier: read("returnAccelerationMultiplier"),
     lowerSpeed: read("lowerSpeed"),
     liftSpeed: read("liftSpeed"),
-    cableRetractedLength: read("cableRetractedLength"),
-    cableExtendedLength: read("cableExtendedLength"),
     plungerSpeed: read(
       "plungerSpeed",
       legacyCloseSpeed === undefined

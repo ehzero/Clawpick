@@ -112,18 +112,6 @@ const CLAW_TUNING_SECTIONS: Array<{
         unit: " m/s",
       },
       {
-        label: "수축 와이어 길이",
-        setting: "cableRetractedLength",
-        step: 0.01,
-        unit: " m",
-      },
-      {
-        label: "최대 와이어 길이",
-        setting: "cableExtendedLength",
-        step: 0.05,
-        unit: " m",
-      },
-      {
         label: "진자 선형 감쇠",
         setting: "swingLinearDamping",
         step: 0.01,

@@ -21,8 +21,6 @@ export interface PhysicsSettings {
   returnAccelerationMultiplier: number;
   lowerSpeed: number;
   liftSpeed: number;
-  cableRetractedLength: number;
-  cableExtendedLength: number;
   plungerSpeed: number;
   plungerMaxForce: number;
   plungerPositionTolerance: number;

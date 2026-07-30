@@ -5,6 +5,16 @@ import {
   measureInextensibleCable,
   projectInextensibleCableVelocity,
 } from "../game/cableDynamics.mjs";
+import {
+  CLAW_FLOOR_CLEARANCE,
+  RETRACTED_CABLE_LENGTH,
+  calculateMaximumCableLength,
+} from "../game/cableTravel.mjs";
+import {
+  CLAW_GEOMETRY,
+  getOpenClawLowestY,
+} from "../game/clawKinematics.mjs";
+import { PRIZE_DECK_FLOOR_Y } from "../game/machineDimensions.mjs";
 
 const ZERO = { x: 0, y: 0, z: 0 };
 
@@ -13,15 +23,16 @@ test("the raised claw retracts almost all visible cable", async () => {
     new URL("../components/MechanicalClaw.tsx", import.meta.url),
     "utf8",
   );
-  const minimumLength = Number(
-    source.match(/const MIN_CABLE_LENGTH = ([\d.]+);/)?.[1],
-  );
   const attachmentY = Number(
     source.match(/const CLAW_ATTACHMENT_Y = ([\d.]+);/)?.[1],
   );
 
-  assert.ok(minimumLength <= 0.05);
+  assert.equal(RETRACTED_CABLE_LENGTH, 0.01);
   assert.ok(attachmentY >= 0.36);
+  assert.match(
+    source,
+    /WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH - CLAW_ATTACHMENT_Y/,
+  );
 });
 
 test("the hoist cable starts at the guide exit instead of its solid center", async () => {
@@ -48,7 +59,43 @@ test("the hoist cable starts at the guide exit instead of its solid center", asy
   );
   assert.match(
     source,
-    /const CLAW_START_Y =\s*WIRE_EXIT_Y - MIN_CABLE_LENGTH/,
+    /const CLAW_START_Y =\s*WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH/,
+  );
+});
+
+test("the trolley body render mesh is a cube", async () => {
+  const source = await readFile(
+    new URL("../components/MechanicalClaw.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const TROLLEY_BODY_SIZE = 0\.64;/);
+  assert.match(source, /name="trolley-body-cube"/);
+  assert.match(
+    source,
+    /args=\{\[\s*TROLLEY_BODY_SIZE,\s*TROLLEY_BODY_SIZE,\s*TROLLEY_BODY_SIZE,\s*\]\}/,
+  );
+});
+
+test("the extended cable stops the open claw 1 cm above the prize floor", () => {
+  const wireExitY = 3.8;
+  const housingAttachmentY = 0.4;
+  const openClawLowestY = getOpenClawLowestY(CLAW_GEOMETRY);
+  const maximumLength = calculateMaximumCableLength({
+    wireExitY,
+    housingAttachmentY,
+    openClawLowestY,
+    floorY: PRIZE_DECK_FLOOR_Y,
+  });
+  const housingY =
+    wireExitY - maximumLength - housingAttachmentY;
+  const lowestWorldY = housingY + openClawLowestY;
+
+  assert.ok(
+    Math.abs(
+      lowestWorldY -
+        (PRIZE_DECK_FLOOR_Y + CLAW_FLOOR_CLEARANCE),
+    ) < 1e-9,
   );
 });
 

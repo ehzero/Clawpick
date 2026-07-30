@@ -1,6 +1,7 @@
 const DEG = Math.PI / 180;
 
 const BASE_FINGER_LENGTH = 0.9765105457;
+export const FINGER_COLLIDER_END_OVERLAP = 0.0015;
 const BASE_CURVE_POINTS = [
   { r: 0, y: 0 },
   { r: -0.0174, y: -0.1239 },
@@ -143,6 +144,38 @@ export function getClawPoseFromPlungerY(
     plungerY,
     tipSeparation: Math.sqrt(3) * Math.abs(tip.r),
   };
+}
+
+export function getOpenClawLowestY(geometry = CLAW_GEOMETRY) {
+  const pose = getClawPoseFromPlungerY(
+    geometry.openPlungerY,
+    geometry,
+  );
+  const start =
+    geometry.curvePoints[geometry.fingerCurveEndIndex];
+  const end = geometry.curvePoints.at(-1);
+  const deltaR = end.r - start.r;
+  const deltaY = end.y - start.y;
+  const length = Math.hypot(deltaR, deltaY);
+  const directionR = deltaR / length;
+  const directionY = deltaY / length;
+  const sine = Math.sin(pose.angle);
+  const cosine = Math.cos(pose.angle);
+  const centerR = (start.r + end.r) / 2;
+  const centerY = (start.y + end.y) / 2;
+  const worldCenterY =
+    pose.hinge.y + sine * centerR + cosine * centerY;
+  const worldDirectionY =
+    sine * directionR + cosine * directionY;
+  const worldFaceNormalY =
+    cosine * directionR - sine * directionY;
+  const verticalHalfExtent =
+    (length / 2 + FINGER_COLLIDER_END_OVERLAP) *
+      Math.abs(worldDirectionY) +
+    (geometry.fingerThickness / 2) *
+      Math.abs(worldFaceNormalY);
+
+  return worldCenterY - verticalHalfExtent;
 }
 
 export function getClawPose(closure, geometry = CLAW_GEOMETRY) {

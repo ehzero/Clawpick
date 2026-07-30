@@ -23,11 +23,17 @@ import type { RopeImpulseJoint } from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
 import {
   CLAW_GEOMETRY,
+  FINGER_COLLIDER_END_OVERLAP,
   createClawGeometry,
   getClawPoseFromPlungerY,
+  getOpenClawLowestY,
   sampleClawClearance,
 } from "@/game/clawKinematics.mjs";
 import { useClawSpecStore } from "@/game/clawSpecs";
+import {
+  RETRACTED_CABLE_LENGTH,
+  calculateMaximumCableLength,
+} from "@/game/cableTravel.mjs";
 import {
   measureInextensibleCable,
   projectInextensibleCableVelocity,
@@ -44,6 +50,7 @@ import {
   stepUmbilicalState,
   updateDynamicTubeGeometry,
 } from "@/game/umbilicalDynamics.mjs";
+import { PRIZE_DECK_FLOOR_Y } from "@/game/machineDimensions.mjs";
 import { useGameStore } from "@/game/store";
 import type { ClawPartSpecs } from "@/game/types";
 
@@ -52,7 +59,6 @@ export const CHUTE_X = 2.28;
 export const CHUTE_Z = 1.18;
 
 const WIRE_GUIDE_CENTER_Y = TROLLEY_Y - 0.18;
-const MIN_CABLE_LENGTH = 0.04;
 const CLAW_ATTACHMENT_Y = 0.4;
 const WIRE_GUIDE_RADIUS = 0.22;
 const WIRE_GUIDE_HEIGHT = 0.08;
@@ -62,7 +68,7 @@ const PLUNGER_STROKE =
   CLAW_GEOMETRY.closedPlungerY - CLAW_GEOMETRY.openPlungerY;
 const PLUNGER_OPEN_TARGET_Y = CLAW_GEOMETRY.openPlungerY;
 const CLAW_START_Y =
-  WIRE_EXIT_Y - MIN_CABLE_LENGTH - CLAW_ATTACHMENT_Y;
+  WIRE_EXIT_Y - RETRACTED_CABLE_LENGTH - CLAW_ATTACHMENT_Y;
 const CLAW_LIMIT_X = 2.32;
 const CLAW_LIMIT_Z = 1.38;
 const FINGER_COUNT = 3;
@@ -84,10 +90,12 @@ const UMBILICAL_RADIAL_SEGMENTS = 10;
 const UMBILICAL_BODY_LEAD_SEGMENTS = 12;
 const UMBILICAL_TROLLEY_LEAD_SEGMENTS = 12;
 const UMBILICAL_TROLLEY_LEAD_LENGTH = 0.14;
+const UMBILICAL_TROLLEY_CLEARANCE = 0.008;
 const UMBILICAL_BODY_CLEARANCE = 0.008;
 const HOUSING_TOP_COLUMN_CENTER_Y = 0.29;
 const HOUSING_TOP_COLUMN_CENTER_RADIUS = (0.17 + 0.205) / 2;
 const HOUSING_COLLIDER_CENTER_Y = 0.09;
+const TROLLEY_BODY_SIZE = 0.64;
 const HOUSING_COLLARS = [
   { y: 0.4, radius: 0.18, height: 0.022 },
   { y: 0.195, radius: 0.232, height: 0.028 },
@@ -693,7 +701,7 @@ function ClawFingerCollider({
           key={segmentIndex}
           args={[
             (geometry.fingerWidth * (segment.widthScale ?? 1)) / 2,
-            segment.length / 2 + 0.0015,
+            segment.length / 2 + FINGER_COLLIDER_END_OVERLAP,
             geometry.fingerThickness / 2,
           ]}
           position={segment.position}
@@ -1064,8 +1072,18 @@ function TrolleyMechanism({
       </group>
 
       <group ref={trolleyRef}>
-        <mesh castShadow position={[0, 4.02, 0]}>
-          <boxGeometry args={[0.88, 0.34, 0.64]} />
+        <mesh
+          castShadow
+          position={[0, 4.02, 0]}
+          name="trolley-body-cube"
+        >
+          <boxGeometry
+            args={[
+              TROLLEY_BODY_SIZE,
+              TROLLEY_BODY_SIZE,
+              TROLLEY_BODY_SIZE,
+            ]}
+          />
           <meshStandardMaterial color="#242724" metalness={0.68} roughness={0.3} />
         </mesh>
         <mesh castShadow position={[0, 4.03, 0.326]}>
@@ -1149,9 +1167,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     [],
   );
   const plungerY = useRef<number>(CLAW_GEOMETRY.openPlungerY);
-  const cableLength = useRef(
-    useGameStore.getState().settings.cableRetractedLength,
-  );
+  const cableLength = useRef(RETRACTED_CABLE_LENGTH);
   const trolleyPosition = useRef({ x: 0, z: 0 });
   const trolleyVelocity = useRef({ x: 0, z: 0 });
   const phaseElapsed = useRef(0);
@@ -1180,6 +1196,18 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
   const editableClawGeometry = useMemo(
     () => createClawGeometry(clawPartSpecs),
     [clawPartSpecs],
+  );
+  const maximumCableLength = useMemo(
+    () =>
+      calculateMaximumCableLength({
+        wireExitY: WIRE_EXIT_Y,
+        housingAttachmentY: CLAW_ATTACHMENT_Y,
+        openClawLowestY: getOpenClawLowestY(
+          editableClawGeometry,
+        ),
+        floorY: PRIZE_DECK_FLOOR_Y,
+      }),
+    [editableClawGeometry],
   );
   const housingScale = useMemo(
     () => [
@@ -1230,8 +1258,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     const delta = Math.min(unsafeDelta, 0.04);
     const state = useGameStore.getState();
     const { settings, phase, input } = state;
-    const minimumCableLength = settings.cableRetractedLength;
-    const maximumCableLength = settings.cableExtendedLength;
+    const minimumCableLength = RETRACTED_CABLE_LENGTH;
     cableLength.current = THREE.MathUtils.clamp(
       cableLength.current,
       minimumCableLength,
@@ -1556,15 +1583,6 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
 
     setMeshBetween(cableRef.current, anchor, attachment);
 
-    const trolleyConnection = new THREE.Vector3(
-      trolleyPosition.current.x,
-      WIRE_GUIDE_CENTER_Y,
-      trolleyPosition.current.z,
-    )
-      .add(new THREE.Vector3(-0.29, 0.03, -0.04));
-    const umbilicalTop = trolleyConnection
-      .clone()
-      .add(new THREE.Vector3(0, -UMBILICAL_TROLLEY_LEAD_LENGTH, 0));
     const bodyWorldPosition = new THREE.Vector3(
       bodyPosition.x,
       bodyPosition.y,
@@ -1574,6 +1592,23 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
       clawPartSpecs.powerCableCoilDiameter / 2;
     const cableStrandRadius =
       clawPartSpecs.powerCableDiameter / 2;
+    const trolleyOutwardDirection = new THREE.Vector3(-1, 0, 0);
+    const trolleyConnectionInset = cableStrandRadius * 0.35;
+    const trolleyConnection = new THREE.Vector3(
+      trolleyPosition.current.x -
+        (TROLLEY_BODY_SIZE / 2 - trolleyConnectionInset),
+      TROLLEY_Y,
+      trolleyPosition.current.z,
+    );
+    const umbilicalTop = trolleyConnection
+      .clone()
+      .addScaledVector(
+        trolleyOutwardDirection,
+        cableEnvelopeRadius +
+          UMBILICAL_TROLLEY_CLEARANCE +
+          trolleyConnectionInset,
+      )
+      .add(new THREE.Vector3(0, -UMBILICAL_TROLLEY_LEAD_LENGTH, 0));
     const expandedHousingRadius =
       clawPartDimensions.housing.radius +
       cableEnvelopeRadius +
@@ -1695,7 +1730,7 @@ export default function MechanicalClaw({ bodies }: MechanicalClawProps) {
     const umbilicalPoints = prependUmbilicalLead({
       helix: bodyConnectedUmbilical,
       start: trolleyConnection,
-      departureDirection: new THREE.Vector3(0, -1, 0),
+      departureDirection: trolleyOutwardDirection,
       segmentCount: umbilicalTrolleyLeadSegments,
     });
     updateDynamicTubeGeometry({

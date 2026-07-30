@@ -15,6 +15,10 @@ import MechanicalClaw, {
   CHUTE_Z,
   OverheadRails,
 } from "./MechanicalClaw";
+import {
+  PRIZE_DECK_COLLIDER_CENTER_Y,
+  PRIZE_DECK_COLLIDER_HALF_HEIGHT,
+} from "@/game/machineDimensions.mjs";
 import { useGameStore } from "@/game/store";
 
 const PRIZE_POSITIONS: Array<[number, number, number]> = Array.from(
@@ -561,7 +565,11 @@ function Cabinet({ showVisuals }: { showVisuals: boolean }) {
   return (
     <>
       <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[3, 0.12, 1.9]} position={[0, -0.12, 0]} friction={1.1} />
+        <CuboidCollider
+          args={[3, PRIZE_DECK_COLLIDER_HALF_HEIGHT, 1.9]}
+          position={[0, PRIZE_DECK_COLLIDER_CENTER_Y, 0]}
+          friction={1.1}
+        />
         <CuboidCollider args={[0.12, 2.25, 1.9]} position={[-3, 2.1, 0]} />
         <CuboidCollider args={[0.12, 2.25, 1.9]} position={[3, 2.1, 0]} />
         <CuboidCollider args={[3, 2.25, 0.12]} position={[0, 2.1, -1.9]} />

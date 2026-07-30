@@ -51,8 +51,6 @@ test("the claw tuning panel exposes every claw physics setting", async () => {
     "returnAccelerationMultiplier",
     "lowerSpeed",
     "liftSpeed",
-    "cableRetractedLength",
-    "cableExtendedLength",
     "swingLinearDamping",
     "housingAngularDamping",
     "plungerSpeed",
@@ -73,7 +71,7 @@ test("the claw tuning panel exposes every claw physics setting", async () => {
   );
 });
 
-test("manual and automatic winches share the configured cable limits", async () => {
+test("manual and automatic winches share fixed geometric cable limits", async () => {
   const [panel, store, claw] = await Promise.all([
     readFile(new URL("../components/TuningPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../game/store.ts", import.meta.url), "utf8"),
@@ -83,12 +81,18 @@ test("manual and automatic winches share the configured cable limits", async () 
     ),
   ]);
 
-  assert.match(panel, /setting: "cableRetractedLength"/);
-  assert.match(panel, /setting: "cableExtendedLength"/);
-  assert.match(store, /cableRetractedLength: 0\.04/);
-  assert.match(store, /cableExtendedLength: 1\.8/);
-  assert.match(claw, /const minimumCableLength = settings\.cableRetractedLength/);
-  assert.match(claw, /const maximumCableLength = settings\.cableExtendedLength/);
+  assert.doesNotMatch(panel, /setting: "cableRetractedLength"/);
+  assert.doesNotMatch(panel, /setting: "cableExtendedLength"/);
+  assert.doesNotMatch(store, /cableRetractedLength:/);
+  assert.doesNotMatch(store, /cableExtendedLength:/);
+  assert.match(
+    claw,
+    /const minimumCableLength = RETRACTED_CABLE_LENGTH/,
+  );
+  assert.match(
+    claw,
+    /const maximumCableLength = useMemo\([\s\S]*?calculateMaximumCableLength/,
+  );
   assert.match(claw, /cableLength\.current >= maximumCableLength - 0\.001/);
   assert.match(claw, /cableLength\.current <= minimumCableLength \+ 0\.001/);
 });
@@ -138,6 +142,8 @@ test("linkage rigid bodies omit damping and use Rapier defaults", async () => {
 test("saved linkage damping is reset once for the zero-damping experiment", () => {
   const previous = {
     housingAngularDamping: 0.42,
+    cableRetractedLength: 0.04,
+    cableExtendedLength: 1.8,
     plungerDampingRatio: 1.1,
     plungerGripEngagementDistance: 0.012,
     plungerClosedStroke: 0.138,
@@ -149,6 +155,8 @@ test("saved linkage damping is reset once for the zero-damping experiment", () =
   );
 
   assert.equal(migrated.housingAngularDamping, 0);
+  assert.equal("cableRetractedLength" in migrated, false);
+  assert.equal("cableExtendedLength" in migrated, false);
   assert.equal("plungerDampingRatio" in migrated, false);
   assert.equal("plungerGripEngagementDistance" in migrated, false);
   assert.equal("plungerClosedStroke" in migrated, false);
