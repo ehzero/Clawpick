@@ -316,18 +316,9 @@ test("editable rod and wheel specs keep every wheel seated", () => {
         );
       }
 
-      // The gearcase face is the carriage's stop on the drive side, so the can
-      // and the terminal box have to stay behind it or the carriage would reach
-      // them instead of the flat face the stop is dimensioned from.
+      // The gearcase is the whole drive, so the only checks are that it reaches
+      // the axles it turns and stays inside the envelope it was fitted into.
       const drive = measureTravelDriveFit(specs);
-      assert.ok(
-        drive.motorSetback >= 0,
-        `${where}: motor can stands ${-drive.motorSetback} proud of the end stop`,
-      );
-      assert.ok(
-        drive.terminalSetback >= 0,
-        `${where}: terminal box stands ${-drive.terminalSetback} proud`,
-      );
       assert.ok(
         drive.axleInsideCase > 0,
         `${where}: gearcase stops ${-drive.axleInsideCase} below the wheel axles it turns`,
@@ -340,11 +331,11 @@ test("editable rod and wheel specs keep every wheel seated", () => {
         drive.depthMargin >= 0,
         `${where}: the drive sets the bridge depth, costing ${-drive.depthMargin} of Z travel`,
       );
-      // The can hangs into open air under the bridge; the carriage top is the
-      // nearest thing below it, and the two never share an X.
+      // The case is clamped around the bridge rods, so its underside sits at or
+      // below them rather than cutting through the pair.
       assert.ok(
-        drive.motorBottomY > TROLLEY.y - TROLLEY.size / 2,
-        `${where}: motor can reaches ${drive.motorBottomY}, down past the carriage`,
+        drive.caseBottomY <= BRIDGE.y - layout.rodRadius + 1e-9,
+        `${where}: gearcase underside at ${drive.caseBottomY} cuts the bridge rods`,
       );
 
       assert.ok(
@@ -443,20 +434,16 @@ test("axis travel is derived from the gantry, not hand-picked", () => {
 
 test("the bridge mass is split across every collider that carries it", () => {
   const share = BRIDGE.massShare;
-  // Two rods, one tie, two plates, one gearcase, one motor.
+  // Two rods, one tie, two plates, one gearcase.
   const total =
-    share.rod * 2 +
-    share.tie +
-    share.endPlate * 2 +
-    share.driveCase +
-    share.driveMotor;
+    share.rod * 2 + share.tie + share.endPlate * 2 + share.driveCase;
 
   assert.ok(
     Math.abs(total - 1) < 1e-9,
     `shares sum to ${total}, so the bridge does not weigh BRIDGE.mass`,
   );
   assert.ok(
-    share.driveCase + share.driveMotor > share.endPlate * 2,
-    "a real gearmotor outweighs the plates it hangs off",
+    share.driveCase > share.endPlate * 2,
+    "a gearcase with a drive train in it outweighs the plates either side",
   );
 });

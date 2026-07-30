@@ -21,12 +21,12 @@
  * Seen along the bridge, the left end also carries the travel drive:
  *
  *   ═╤═══════════════════   side rail
- *    │ (○)                  driven rail wheel on a thick output shaft
- *   ▐█████▌════════════      gearcase bolted to the end plate, the three
- *    │ ███ │                 bridge rods ending inside it
- *      ███                  motor can hanging below the gearcase
+ *    │ (○)                  rail wheel this gearcase turns
+ *   ████████════════════    gearcase bolted to the end plate, the three
+ *                           bridge rods ending inside it
  *
- * That gearcase is what the carriage runs into on the left, so X travel is not
+ * The drive is the gearcase alone — no motor can, cover or terminal box. That
+ * gearcase is what the carriage runs into on the left, so X travel is not
  * symmetric about the machine centre.
  *
  * Pure data plus derived travel, so the renderer and the physics bodies read
@@ -91,29 +91,31 @@ export const RAIL = Object.freeze({
 /** The bridge: a rod pair plus a tie rod, on end plates, riding the side rods. */
 export const BRIDGE = Object.freeze({
   y: 3.8,
-  /** Rods, plates and the travel gearmotor together. */
-  mass: 5.2,
+  /** Rods, plates and the travel gearcase together. */
+  mass: 4.8,
   /** Rail wheels sit this far fore and aft, giving the bridge its anti-tip base. */
   wheelZ: 0.17,
   /**
-   * How the bridge mass is split across its colliders. The gearmotor is a third
+   * How the bridge mass is split across its colliders. The gearcase is a quarter
    * of the assembly, which is why it is worth carrying rather than assuming a
    * massless drive. Shares must sum to one over the parts each is applied to:
-   * two rods, one tie, two plates, one gearcase, one motor.
+   * two rods, one tie, two plates, one gearcase.
    */
   massShare: Object.freeze({
     rod: 0.26,
     tie: 0.11,
     endPlate: 0.055,
-    driveCase: 0.19,
-    driveMotor: 0.07,
+    driveCase: 0.26,
   }),
 });
 
 /**
- * Bridge travel drive: the geared motor on the left end plate that turns the two
- * rail wheels on that side, which is what moves the whole bridge along the fixed
- * side rods. The far plate's wheels idle.
+ * Bridge travel drive: the gearcase on the left end plate that turns the two rail
+ * wheels on that side, which is what moves the whole bridge along the fixed side
+ * rods. The far plate's wheels idle.
+ *
+ * The whole drive is this one case. Its motor, cover and terminal box are inside
+ * it or left unmodelled, so nothing on the drive projects past the case faces.
  *
  * It lives inboard of the plate, in the only pocket the layout leaves free, and
  * that is also the pocket the carriage would otherwise run through — so the
@@ -126,25 +128,9 @@ export const TRAVEL_DRIVE = Object.freeze({
   caseDepth: 0.28,
   /** The case is a box bolted onto the plate, inset from the plate outline. */
   caseInset: 0.02,
-  /** Motor can, hanging under the gearcase where nothing else passes. */
-  motorRadius: 0.085,
-  motorLength: 0.3,
-  motorFins: 3,
-  /**
-   * Bolted inspection cover. It goes on the aft face rather than the inboard one
-   * because the inboard face is the carriage's end stop and has to stay flat.
-   */
-  coverThickness: 0.016,
-  /** Terminal box on top of the case, with the drive's cable glands aft. */
-  terminal: Object.freeze({ width: 0.18, height: 0.07, depth: 0.22 }),
-  glandRadius: 0.016,
-  glandLength: 0.08,
-  glandSpacing: 0.08,
-  /** Driven output shaft, thicker than the plain stub axle it replaces. */
-  shaftRadius: 0.03,
 });
 
-/** Plain stub axle a wheel turns on where it is not driven. */
+/** Plain stub axle every rail wheel turns on. */
 const STUB_AXLE_RADIUS = 0.016;
 
 /** The carriage, straddling both bridge rods and hanging below them. */
@@ -188,7 +174,6 @@ function travelDriveLayout({ plateInnerX, plateHeight, plateLocalY }) {
   // from one subtraction rather than from a sign.
   const innerFaceX = plateInnerX - TRAVEL_DRIVE.caseDepth;
   const caseX = innerFaceX + TRAVEL_DRIVE.caseDepth / 2;
-  const caseTopLocalY = plateLocalY + caseHeight / 2;
 
   return {
     side: TRAVEL_DRIVE.side,
@@ -200,44 +185,11 @@ function travelDriveLayout({ plateInnerX, plateHeight, plateLocalY }) {
       x: caseX,
       y: plateLocalY,
     },
-    /** Motor can, hanging below the case clear of the rods and the carriage. */
-    motor: {
-      radius: TRAVEL_DRIVE.motorRadius,
-      length: TRAVEL_DRIVE.motorLength,
-      fins: TRAVEL_DRIVE.motorFins,
-      x: caseX,
-      y: plateLocalY - caseHeight / 2 - TRAVEL_DRIVE.motorLength / 2,
-    },
-    cover: {
-      thickness: TRAVEL_DRIVE.coverThickness,
-      height: caseHeight * 0.66,
-      width: TRAVEL_DRIVE.caseDepth * 0.66,
-      x: caseX,
-      y: plateLocalY,
-      z: caseWidth / 2 + TRAVEL_DRIVE.coverThickness / 2,
-    },
-    terminal: {
-      ...TRAVEL_DRIVE.terminal,
-      x: caseX,
-      y: caseTopLocalY + TRAVEL_DRIVE.terminal.height / 2,
-    },
-    gland: {
-      radius: TRAVEL_DRIVE.glandRadius,
-      length: TRAVEL_DRIVE.glandLength,
-      spacing: TRAVEL_DRIVE.glandSpacing,
-      y: caseTopLocalY + TRAVEL_DRIVE.terminal.height / 2,
-      z: TRAVEL_DRIVE.terminal.depth / 2,
-    },
-    /** The driven wheels' output shafts, against plain stubs on the far plate. */
-    shaftRadius: TRAVEL_DRIVE.shaftRadius,
     /** |x| of the face the carriage runs into. */
     innerFaceX,
-    /** Highest and widest points, so the assembly is checked like the rest. */
-    localTopY: caseTopLocalY + TRAVEL_DRIVE.terminal.height,
-    halfDepth: Math.max(
-      caseWidth / 2 + TRAVEL_DRIVE.coverThickness,
-      TRAVEL_DRIVE.terminal.depth / 2 + TRAVEL_DRIVE.glandLength,
-    ),
+    /** Highest and widest points, so the drive is checked like the rest. */
+    localTopY: plateLocalY + caseHeight / 2,
+    halfDepth: caseWidth / 2,
   };
 }
 
@@ -425,9 +377,10 @@ export function trolleyClearsStops(options) {
 }
 
 /**
- * Whether the travel drive sits in the pocket it is supposed to. The gearcase
- * face is the carriage's end stop by design, so every other part of the drive has
- * to stay outboard of that face, or the carriage would reach it too.
+ * Whether the travel drive sits in the pocket it is supposed to. The gearcase is
+ * the whole drive, so its own faces are the only thing to check: the inboard one
+ * is the carriage's end stop, and the rest has to stay within the plate it bolts
+ * to and reach the axles it turns.
  */
 export function measureTravelDriveFit(specs) {
   const layout = specs ? createGantryGeometry(specs) : DEFAULT_GANTRY_LAYOUT;
@@ -435,19 +388,14 @@ export function measureTravelDriveFit(specs) {
   const caseTopY = BRIDGE.y + drive.case.y + drive.case.height / 2;
 
   return {
-    /** How far the motor can stays outboard of the carriage's end stop. */
-    motorSetback: drive.motor.x - drive.motor.radius - drive.innerFaceX,
-    /** Same, for the terminal box on top of the case. */
-    terminalSetback:
-      drive.terminal.x - drive.terminal.width / 2 - drive.innerFaceX,
     /** The case must reach the driven wheels' axles to drive them. */
     axleInsideCase: caseTopY - layout.bridgeWheelY,
     /** And it must not stand proud of the plate it is bolted to. */
     plateOverhang: drive.case.width / 2 - layout.endPlate.depth / 2,
-    /** Nothing on the drive may set the bridge's Z extent. */
+    /** The drive may not be what sets the bridge's Z extent. */
     depthMargin: layout.halfDepth - drive.halfDepth,
-    /** Clearance under the motor can, which hangs into open air. */
-    motorBottomY: BRIDGE.y + drive.motor.y - drive.motor.length / 2,
+    /** Its underside has to clear the bridge rods it is clamped around. */
+    caseBottomY: BRIDGE.y + drive.case.y - drive.case.height / 2,
   };
 }
 
