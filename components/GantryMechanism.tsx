@@ -601,15 +601,6 @@ export default function GantryMechanism({
               roughness={0.3}
             />
           </mesh>
-          <mesh castShadow position={[0, 0.01, TROLLEY.size / 2 + 0.006]}>
-            <boxGeometry args={[0.72, 0.22, 0.035]} />
-            <meshStandardMaterial
-              color="#111311"
-              metalness={0.35}
-              roughness={0.48}
-            />
-          </mesh>
-
           {/* One yoke plate, on the centreline between the two rods and inboard
               of the wheels, carrying both axles. */}
           <mesh castShadow position={[0, yokeBottom + yokeHeight / 2, 0]}>
