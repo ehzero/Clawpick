@@ -63,6 +63,19 @@ const CHUTE_GUIDE_WALLS: ChuteGuideWall[] = [
   { position: [0, 0.42, 0.585], size: [1.2, 0.62, 0.035] },
 ];
 
+/**
+ * Refraction is deliberately absent. `transmission` on a physical material makes
+ * the renderer draw the whole scene into a second render target every frame and
+ * mipmap it, and the glass tunnel covers nearly the entire viewport, so that
+ * doubled scene render was the most expensive thing on the GPU here.
+ *
+ * What actually reads as glass is the reflection, not the refraction: alpha
+ * blending carries the tint and the environment highlights carry the surface.
+ * `envMapIntensity` is pushed above 1 because a transparent material blends its
+ * specular term at `opacity` as well, so the highlights need headroom to survive
+ * an 18% alpha. `ior` still shapes the fresnel reflectance without transmission,
+ * so it stays.
+ */
 function CabinetGlassMaterial() {
   return (
     <meshPhysicalMaterial
@@ -70,9 +83,8 @@ function CabinetGlassMaterial() {
       transparent
       opacity={0.18}
       roughness={0.055}
-      transmission={0.72}
-      thickness={0.025}
       ior={1.48}
+      envMapIntensity={2.2}
       metalness={0}
       depthWrite={false}
       side={THREE.DoubleSide}
@@ -80,6 +92,12 @@ function CabinetGlassMaterial() {
   );
 }
 
+/**
+ * Same reasoning as the enclosure. `attenuationColor`/`attenuationDistance` went
+ * with it — those tint light travelling *through* the volume and are only read
+ * inside the transmission branch, so they were dead weight once refraction left.
+ * The guides are thin, so the attenuation they lost was barely visible.
+ */
 function AcrylicGuideMaterial() {
   return (
     <meshPhysicalMaterial
@@ -87,12 +105,9 @@ function AcrylicGuideMaterial() {
       transparent
       opacity={0.46}
       roughness={0.12}
-      transmission={0.42}
-      thickness={0.028}
       ior={1.49}
+      envMapIntensity={1.4}
       metalness={0}
-      attenuationColor="#35b9c2"
-      attenuationDistance={0.35}
       depthWrite={false}
     />
   );

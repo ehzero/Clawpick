@@ -29,13 +29,27 @@ test("the cabinet renders manufactured details instead of flat planes", async ()
   );
 
   assert.match(source, /<RoundedBox/g);
-  assert.match(source, /transmission=\{0\.72\}/);
-  assert.match(source, /thickness=\{0\.025\}/);
+  assert.match(source, /envMapIntensity=\{2\.2\}/);
   assert.match(source, /clearcoat=\{0\.65\}/);
   assert.match(source, />\s*CLAWPICK\s*<\/Text>/);
   assert.match(source, />\s*PRIZE OUT\s*<\/Text>/);
   assert.match(source, />\s*LEISURE GAME\s*<\/Text>/);
   assert.match(source, /emissiveIntensity=\{2\}/);
+});
+
+test("transparent cabinet parts stay free of refraction", async () => {
+  const source = await readFile(
+    new URL("../components/MachineScene.tsx", import.meta.url),
+    "utf8",
+  );
+
+  // `transmission` makes the renderer draw the scene into a second target and
+  // mipmap it every frame, and the glass tunnel covers most of the viewport, so
+  // it cost a doubled scene render for an effect the reflections already sell.
+  assert.doesNotMatch(source, /transmission=/);
+  // Only read inside the transmission branch, so these are dead without it.
+  // Matched with `=` so the prose explaining the removal does not trip this.
+  assert.doesNotMatch(source, /attenuationColor=|attenuationDistance=/);
 });
 
 test("the prize chute has matching acrylic visuals and physical guides", async () => {
@@ -52,7 +66,7 @@ test("the prize chute has matching acrylic visuals and physical guides", async (
   assert.match(source, /function AcrylicGuideMaterial\(/);
   assert.match(source, /color="#68d9df"/);
   assert.match(source, /opacity=\{0\.46\}/);
-  assert.match(source, /attenuationColor="#35b9c2"/);
+  assert.match(source, /envMapIntensity=\{1\.4\}/);
   assert.match(source, /function PrizeChuteGuideColliders\(/);
   assert.match(source, /<PrizeChuteGuideColliders \/>/);
   assert.match(source, /friction=\{0\.18\}/);
