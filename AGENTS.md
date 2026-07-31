@@ -38,8 +38,9 @@ app/*.tsx  (페이지·모달·레이아웃)
 
 ### game/\*.mjs — 순수 로직
 
-React·Rapier 의존이 **0건**이다. 계층 내부 import도 세 개뿐이라(`machineStep → driveAxis`,
-`gantryGeometry → machineDimensions`, `glassShell → machineDimensions`) 순환이 없다.
+React·Rapier 의존이 **0건**이다. 계층 내부 import도 네 개뿐이라(`machineStep → driveAxis`,
+`gantryGeometry → machineDimensions`, `glassShell → machineDimensions`,
+`chuteShell → glassShell`) 순환이 없다.
 `game/umbilicalDynamics.mjs`만 예외적으로 `three`를 import한다(three는 헤드리스에서
 돌아가므로 테스트 가능).
 
@@ -51,10 +52,15 @@ React·Rapier 의존이 **0건**이다. 계층 내부 import도 세 개뿐이라
 | `game/clawKinematics.mjs` / `game/clawActuator.mjs` | 집게 폐쇄 링크 해석 기구학, 솔레노이드 축력 |
 | `game/gantryGeometry.mjs` / `game/machineDimensions.mjs` | as-built 치수와 파생 이동 범위 |
 | `game/glassShell.mjs` | 강화유리 외곽선 **그리고 거기서 파생되는 캐비닛 벽 콜라이더**(`createGlassWallColliders`) |
+| `game/chuteShell.mjs` | 상품 낙하구 아크릴 가이드 외곽선과 거기서 파생되는 가이드 콜라이더. 두께는 `glassShell`의 `GLASS.thickness`를 읽는다 |
 | `game/joystick.mjs` / `game/clawTuning.mjs` | 입력 정규화, UI 레벨 ↔ 물리값 매핑 |
 | `game/settingsStorage.mjs` / `game/settingsMigration.mjs` | 물리 설정 영속화와 마이그레이션 |
 
 `game/glassShell.mjs`를 렌더 전용으로 오해하지 마라. 벽 barrier의 유일한 치수 소스다.
+`game/chuteShell.mjs`도 같다 — 낙하구 가이드의 보이는 면과 인형이 닿는 면이 같은
+외곽선에서 나온다. 두 모듈의 링 산술이 닮았다고 공용 함수로 합치지 마라. 유리의 내측면은
+갠트리 여유가 측정되는 기준이라 `CABINET`에서 오고, 가이드의 내측면은 낙하구 입구에
+맞춰져 있어서 소스가 다르다.
 
 ### components/\*.tsx — 렌더와 물리 적용
 

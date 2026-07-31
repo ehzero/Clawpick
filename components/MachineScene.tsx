@@ -24,6 +24,11 @@ import {
   createGlassShellOutline,
   createGlassWallColliders,
 } from "@/game/glassShell.mjs";
+import {
+  CHUTE_GUIDE,
+  createChuteGuideColliders,
+  createChuteGuideOutline,
+} from "@/game/chuteShell.mjs";
 import { useGameStore } from "@/game/store";
 
 const PRIZE_POSITIONS: Array<[number, number, number]> = Array.from(
@@ -51,17 +56,10 @@ const CABINET_COLORS = {
   glass: "#cceff1",
 } as const;
 
-interface ChuteGuideWall {
-  position: [number, number, number];
-  size: [number, number, number];
+interface TunnelOutline {
+  outer: ReadonlyArray<ReadonlyArray<number>>;
+  inner: ReadonlyArray<ReadonlyArray<number>>;
 }
-
-const CHUTE_GUIDE_WALLS: ChuteGuideWall[] = [
-  { position: [-0.585, 0.42, 0], size: [0.035, 0.62, 1.2] },
-  { position: [0.585, 0.42, 0], size: [0.035, 0.62, 1.2] },
-  { position: [0, 0.42, -0.585], size: [1.2, 0.62, 0.035] },
-  { position: [0, 0.42, 0.585], size: [1.2, 0.62, 0.035] },
-];
 
 /**
  * Refraction is deliberately absent. `transmission` on a physical material makes
@@ -153,56 +151,96 @@ function PrizeDeckVisuals() {
             />
           </mesh>
         ))}
-        <group name="prize-chute-acrylic-guides">
-          {CHUTE_GUIDE_WALLS.map(({ position, size }, index) => (
-            <mesh key={index} position={position} renderOrder={3}>
-              <boxGeometry args={size} />
-              <AcrylicGuideMaterial />
-            </mesh>
-          ))}
-        </group>
+        <ChuteGuideTunnel />
       </group>
     </>
   );
 }
 
 /**
- * One closed rectangular tunnel of glass instead of four loose panels: the
- * outline is extruded upward with a hole through it, so the corners meet and the
- * whole shell is a single transparent object with nothing to sort against.
+ * One closed rectangular tunnel instead of four loose panels: the outline is
+ * extruded upward with a hole through it, so the corners meet by construction and
+ * the result is a single transparent object with nothing to sort against itself.
+ *
+ * The enclosure's glass and the chute's acrylic guides are this same shape at two
+ * scales, so they share the builder rather than each rolling their own extrusion.
  */
+function createTunnelGeometry({
+  outline,
+  height,
+  bottomY,
+}: {
+  outline: TunnelOutline;
+  height: number;
+  bottomY: number;
+}) {
+  const toPath = (points: ReadonlyArray<ReadonlyArray<number>>) => {
+    const path = new THREE.Path();
+    path.moveTo(points[0][0], points[0][1]);
+    for (const [u, v] of points.slice(1)) path.lineTo(u, v);
+    path.closePath();
+    return path;
+  };
+
+  const shape = new THREE.Shape(
+    outline.outer.map(([u, v]) => new THREE.Vector2(u, v)),
+  );
+  shape.holes.push(toPath(outline.inner));
+
+  const tunnel = new THREE.ExtrudeGeometry(shape, {
+    depth: height,
+    bevelEnabled: false,
+    steps: 1,
+  });
+  // Extrusion runs along +Z, so stand it up and drop it onto the deck.
+  tunnel.rotateX(-Math.PI / 2);
+  tunnel.translate(0, bottomY, 0);
+  tunnel.computeVertexNormals();
+  return tunnel;
+}
+
 function useGlassShellGeometry() {
-  const geometry = useMemo(() => {
-    const outline = createGlassShellOutline();
-    const toPath = (points: ReadonlyArray<ReadonlyArray<number>>) => {
-      const path = new THREE.Path();
-      path.moveTo(points[0][0], points[0][1]);
-      for (const [u, v] of points.slice(1)) path.lineTo(u, v);
-      path.closePath();
-      return path;
-    };
-
-    const shape = new THREE.Shape(
-      (outline.outer as ReadonlyArray<ReadonlyArray<number>>).map(
-        ([u, v]) => new THREE.Vector2(u, v),
-      ),
-    );
-    shape.holes.push(toPath(outline.inner));
-
-    const shell = new THREE.ExtrudeGeometry(shape, {
-      depth: GLASS.height,
-      bevelEnabled: false,
-      steps: 1,
-    });
-    // Extrusion runs along +Z, so stand it up and drop it onto the deck.
-    shell.rotateX(-Math.PI / 2);
-    shell.translate(0, GLASS.bottomY, 0);
-    shell.computeVertexNormals();
-    return shell;
-  }, []);
+  const geometry = useMemo(
+    () =>
+      createTunnelGeometry({
+        outline: createGlassShellOutline(),
+        height: GLASS.height,
+        bottomY: GLASS.bottomY,
+      }),
+    [],
+  );
 
   useEffect(() => () => geometry.dispose(), [geometry]);
   return geometry;
+}
+
+function useChuteGuideGeometry() {
+  const geometry = useMemo(
+    () =>
+      createTunnelGeometry({
+        outline: createChuteGuideOutline(),
+        height: CHUTE_GUIDE.height,
+        bottomY: CHUTE_GUIDE.bottomY,
+      }),
+    [],
+  );
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return geometry;
+}
+
+/** Placed by its parent, so the tunnel sits at the chute's local origin. */
+function ChuteGuideTunnel() {
+  const geometry = useChuteGuideGeometry();
+
+  return (
+    <group name="prize-chute-acrylic-guides">
+      <mesh name="chute-guide-tunnel" renderOrder={3}>
+        <primitive object={geometry} attach="geometry" />
+        <AcrylicGuideMaterial />
+      </mesh>
+    </group>
+  );
 }
 
 function GlassEnclosure() {
@@ -239,13 +277,20 @@ function GlassWallColliders() {
   );
 }
 
+/**
+ * The barrier for the acrylic guides, derived from the same outline the tunnel is
+ * extruded from, so the pane a player sees and the surface a prize hits cannot
+ * drift apart. The factory returns chute-local centres, so the chute's own offset
+ * is added here — the physics world has no equivalent of the parent group the
+ * visuals sit under.
+ */
 function PrizeChuteGuideColliders() {
   return (
     <>
-      {CHUTE_GUIDE_WALLS.map(({ position, size }, index) => (
+      {createChuteGuideColliders().map(({ halfExtents, position }, index) => (
         <CuboidCollider
           key={index}
-          args={[size[0] / 2, size[1] / 2, size[2] / 2]}
+          args={halfExtents as [number, number, number]}
           position={[
             CHUTE_X + position[0],
             position[1],

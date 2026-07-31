@@ -58,19 +58,35 @@ test("the prize chute has matching acrylic visuals and physical guides", async (
     "utf8",
   );
 
-  assert.match(source, /const CHUTE_GUIDE_WALLS: ChuteGuideWall\[\]/);
-  assert.equal(
-    source.match(/\{ position: \[[^\n]+size: \[[^\n]+\}/g)?.length,
-    4,
-  );
+  assert.match(source, /function ChuteGuideTunnel\(/);
+  assert.match(source, /name="chute-guide-tunnel"/);
+  assert.match(source, /createChuteGuideOutline\(\)/);
   assert.match(source, /function AcrylicGuideMaterial\(/);
   assert.match(source, /color="#68d9df"/);
   assert.match(source, /opacity=\{0\.46\}/);
   assert.match(source, /envMapIntensity=\{1\.4\}/);
   assert.match(source, /function PrizeChuteGuideColliders\(/);
   assert.match(source, /<PrizeChuteGuideColliders \/>/);
+  assert.match(source, /createChuteGuideColliders\(\)/);
   assert.match(source, /friction=\{0\.18\}/);
   assert.match(source, /restitution=\{0\}/);
+});
+
+test("the chute guides are one tunnel, not four loose panels", async () => {
+  const source = await readFile(
+    new URL("../components/MachineScene.tsx", import.meta.url),
+    "utf8",
+  );
+
+  // Four panels each spanned 1.2 across a tunnel measuring 1.205 outside, so
+  // every corner was left with a slot. Both the mesh and the barrier now come
+  // from one outline, the same fix the enclosure glass already had.
+  assert.doesNotMatch(source, /CHUTE_GUIDE_WALLS|ChuteGuideWall/);
+  assert.match(source, /function useGlassShellGeometry\(/);
+  assert.match(source, /function useChuteGuideGeometry\(/);
+  // The enclosure and the guides are the same shape at two scales, so one
+  // extrusion builder serves both rather than each rolling its own.
+  assert.equal(source.match(/new THREE\.ExtrudeGeometry/g)?.length, 1);
 });
 
 test("all four enclosure sides stay glass without corner pillars", async () => {
