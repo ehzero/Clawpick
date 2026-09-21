@@ -32,6 +32,16 @@ test("server-renders the Clawpick physics lab shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Clawpick Physics Lab<\/title>/i);
+  assert.match(
+    html,
+    /<meta name="robots" content="[^"]*noindex[^"]*nofollow[^"]*"\s*\/?>/i,
+    "the public demo must tell search crawlers not to index or follow it",
+  );
+  assert.match(
+    html,
+    /<meta name="googlebot" content="[^"]*noindex[^"]*nofollow[^"]*"\s*\/?>/i,
+    "Google must receive the same noindex policy as general crawlers",
+  );
   assert.match(html, /CLAWPICK/);
   assert.match(html, /실물 기구 검증실/);
   assert.match(html, /DRAG TO ORBIT/);

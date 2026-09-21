@@ -15,8 +15,10 @@ export default defineConfig(async () => {
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
   const { cloudflare } = await import("@cloudflare/vite-plugin");
+  const pagesBasePath = (process.env.PAGES_BASE_PATH ?? "").replace(/\/$/, "");
 
   return {
+    base: pagesBasePath ? `${pagesBasePath}/` : "/",
     plugins: [
       vinext(),
       cloudflare({

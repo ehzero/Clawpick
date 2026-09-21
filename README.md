@@ -64,3 +64,11 @@ npm test
 
 소스 문자열을 정규식으로 확인하는 기존 테스트는 이 방식으로 점진적으로
 옮기는 중입니다.
+
+## 데모 배포
+
+`master` 브랜치가 GitHub에 푸시되면 GitHub Actions가 정적 데모를 빌드해
+GitHub Pages에 배포합니다. 배포 페이지에는 `noindex`, `nofollow`, `noarchive`,
+`noimageindex`, `nosnippet` 메타 지시자를 넣어 검색 결과와 검색 이미지 노출을
+요청하지 않습니다. 이 설정은 접근 제한이 아니므로 데모 주소를 아는 사용자는
+누구나 접속할 수 있습니다.
